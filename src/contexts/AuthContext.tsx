@@ -1,7 +1,8 @@
-import { createContext, useCallback, useContext, useState, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
 import { User, UserRole } from '@/types';
 import { ModuleType } from '@/types/modules';
-import { canAccessModule as userCanAccessModule, getDefaultPermissions, normalizeUserPermissions } from '@/lib/permissions';
+import { api } from '@/lib/api';
+import { canAccessModule as userCanAccessModule, normalizeUserPermissions } from '@/lib/permissions';
 
 interface AuthContextType {
   user: User | null;
@@ -20,83 +21,53 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const MOCK_USERS: (User & { password: string })[] = [
-  {
-    id: '1',
-    email: 'admin@sistema.gov.br',
-    password: 'admin123',
-    name: 'Administrador Geral',
-    role: 'ADMIN',
-    permissions: getDefaultPermissions('ADMIN'),
-    createdAt: new Date(),
-  },
-  {
-    id: '2',
-    email: 'prefeitura@cidade.gov.br',
-    password: 'prefeitura123',
-    name: 'Joao Silva',
-    role: 'CITY_HALL_ADMIN',
-    permissions: getDefaultPermissions('CITY_HALL_ADMIN'),
-    cityHallId: '1',
-    createdAt: new Date(),
-  },
-  {
-    id: '3',
-    email: 'secretario@cidade.gov.br',
-    password: 'secretario123',
-    name: 'Maria Santos',
-    role: 'SECRETARY',
-    permissions: getDefaultPermissions('SECRETARY'),
-    cityHallId: '1',
-    createdAt: new Date(),
-  },
-  {
-    id: '4',
-    email: 'tecnico@cidade.gov.br',
-    password: 'tecnico123',
-    name: 'Carlos Oliveira',
-    role: 'TECHNICAL',
-    permissions: getDefaultPermissions('TECHNICAL'),
-    cityHallId: '1',
-    createdAt: new Date(),
-  },
-  {
-    id: '5',
-    email: 'iluminacao@cidade.gov.br',
-    password: 'luz12345',
-    name: 'Equipe Iluminacao',
-    role: 'FIELD_LIGHTING',
-    permissions: getDefaultPermissions('FIELD_LIGHTING'),
-    cityHallId: '1',
-    createdAt: new Date(),
-  },
-];
+function readStoredUser(): User | null {
+  const stored = localStorage.getItem('auth_user');
+  if (!stored) return null;
+
+  try {
+    const parsed = JSON.parse(stored);
+    return { ...parsed, createdAt: parsed.createdAt ? new Date(parsed.createdAt) : new Date() };
+  } catch {
+    localStorage.removeItem('auth_user');
+    return null;
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    const stored = localStorage.getItem('auth_user');
-    return stored ? JSON.parse(stored) : null;
-  });
+  const [user, setUser] = useState<User | null>(() => readStoredUser());
+
+  useEffect(() => {
+    api.me()
+      .then(currentUser => {
+        setUser(currentUser);
+        if (currentUser) {
+          localStorage.setItem('auth_user', JSON.stringify(currentUser));
+        } else {
+          localStorage.removeItem('auth_user');
+        }
+      })
+      .catch(() => {
+        setUser(null);
+        localStorage.removeItem('auth_user');
+      });
+  }, []);
 
   const login = useCallback(async (email: string, password: string): Promise<boolean> => {
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    const foundUser = MOCK_USERS.find(
-      u => u.email === email && u.password === password
-    );
-
-    if (foundUser) {
-      const { password: _, ...userWithoutPassword } = foundUser;
-      setUser(userWithoutPassword);
-      localStorage.setItem('auth_user', JSON.stringify(userWithoutPassword));
+    try {
+      const authenticatedUser = await api.login(email, password);
+      setUser(authenticatedUser);
+      localStorage.setItem('auth_user', JSON.stringify(authenticatedUser));
       return true;
+    } catch {
+      return false;
     }
-    return false;
   }, []);
 
   const logout = useCallback(() => {
     setUser(null);
     localStorage.removeItem('auth_user');
+    api.logout().catch(() => undefined);
   }, []);
 
   const hasPermission = useCallback((roles: UserRole[]): boolean => {

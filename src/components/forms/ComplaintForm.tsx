@@ -25,9 +25,12 @@ import {
 import { toast } from 'sonner';
 import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
-import { MOCK_POLES, MOCK_CITY_HALLS_LIST } from '@/data/mockData';
 import { ModuleType, MODULE_CONFIGS, ALL_MODULES } from '@/types/modules';
 import type { Pole } from '@/types';
+import { useCityHall } from '@/contexts/CityHallContext';
+import { usePoles } from '@/contexts/PolesContext';
+import { useModules } from '@/contexts/ModulesContext';
+import { api } from '@/lib/api';
 
 // Fix leaflet icons
 import 'leaflet/dist/leaflet.css';
@@ -80,6 +83,9 @@ const complaintSchema = z.object({
 type ComplaintFormData = z.infer<typeof complaintSchema>;
 
 export function ComplaintForm() {
+  const { cityHalls } = useCityHall();
+  const { poles } = usePoles();
+  const { getActiveModules } = useModules();
   const [selectedCityHallId, setSelectedCityHallId] = useState<string>('');
   const [selectedModule, setSelectedModule] = useState<ModuleType | ''>('');
   const [selectedPole, setSelectedPole] = useState<Pole | null>(null);
@@ -108,13 +114,13 @@ export function ComplaintForm() {
     resolver: zodResolver(complaintSchema),
   });
 
-  const cityHalls = MOCK_CITY_HALLS_LIST.filter(ch => ch.status === 'ATIVO');
+  const activeCityHalls = cityHalls.filter(ch => ch.status === 'ATIVO');
 
   // Get active modules for the selected city hall
   const activeModules = useMemo(() => {
     if (!selectedCityHallId) return [];
-    return DEFAULT_ACTIVE_MODULES[selectedCityHallId] || ['ILUMINACAO'];
-  }, [selectedCityHallId]);
+    return getActiveModules(selectedCityHallId) || DEFAULT_ACTIVE_MODULES[selectedCityHallId] || ['ILUMINACAO'];
+  }, [getActiveModules, selectedCityHallId]);
 
   const isIluminacao = selectedModule === 'ILUMINACAO';
   const moduleConfig = selectedModule ? MODULE_CONFIGS[selectedModule] : null;
@@ -124,17 +130,17 @@ export function ComplaintForm() {
 
   const cityPoles = useMemo(() => {
     if (!selectedCityHallId) return [];
-    return MOCK_POLES.filter(p => p.cityHallId === selectedCityHallId);
-  }, [selectedCityHallId]);
+    return poles.filter(p => p.cityHallId === selectedCityHallId);
+  }, [poles, selectedCityHallId]);
 
   const mapCenter = useMemo(() => {
-    const ch = MOCK_CITY_HALLS_LIST.find(c => c.id === selectedCityHallId);
+    const ch = cityHalls.find(c => c.id === selectedCityHallId);
     if (ch) return { lat: ch.latitude, lng: ch.longitude };
     if (cityPoles.length === 0) return { lat: -15.3989, lng: -42.3091 };
     const avgLat = cityPoles.reduce((s, p) => s + p.latitude, 0) / cityPoles.length;
     const avgLng = cityPoles.reduce((s, p) => s + p.longitude, 0) / cityPoles.length;
     return { lat: avgLat, lng: avgLng };
-  }, [cityPoles, selectedCityHallId]);
+  }, [cityHalls, cityPoles, selectedCityHallId]);
 
   const isPoleAlreadyBurned = selectedPole?.status === 'QUEIMADO';
 
@@ -211,26 +217,40 @@ export function ComplaintForm() {
     }
 
     setIsSubmitting(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
 
-    console.log('Denúncia enviada:', {
-      ...data,
-      moduleType: selectedModule,
-      occurrenceType: isIluminacao ? 'Poste com problema' : occurrenceType,
-      poleNotOnMap,
-      photo: photoFile?.name,
-      ...(isIluminacao && !poleNotOnMap
-        ? { poleId: selectedPole!.id, latitude: selectedPole!.latitude, longitude: selectedPole!.longitude }
-        : { latitude: manualMarkerPos![0], longitude: manualMarkerPos![1], manualAddress }),
-      cityHallId: selectedCityHallId,
-    });
+    try {
+      const latitude = isIluminacao && !poleNotOnMap ? selectedPole!.latitude : manualMarkerPos![0];
+      const longitude = isIluminacao && !poleNotOnMap ? selectedPole!.longitude : manualMarkerPos![1];
+      const description = data.observations?.trim()
+        || (isIluminacao && selectedPole ? `Poste ${selectedPole.id} com problema` : occurrenceType);
 
-    setIsSubmitting(false);
-    setIsSubmitted(true);
+      await api.createComplaint({
+        cityHallId: selectedCityHallId,
+        moduleId: selectedModule,
+        occurrenceType: isIluminacao ? 'Poste com problema' : occurrenceType,
+        poleId: isIluminacao && !poleNotOnMap ? selectedPole!.id : undefined,
+        poleNotOnMap,
+        manualAddress,
+        photoUrl: photoFile?.name,
+        citizenName: data.name,
+        citizenCpf: data.cpf,
+        citizenPhone: data.phone,
+        description,
+        latitude,
+        longitude,
+      });
 
-    toast.success('Denúncia registrada com sucesso!', {
-      description: 'Você receberá atualizações sobre o status.',
-    });
+      setIsSubmitted(true);
+      toast.success('Denuncia registrada com sucesso!', {
+        description: 'A equipe responsavel recebera o chamado no painel.',
+      });
+    } catch (error) {
+      toast.error('Nao foi possivel registrar a denuncia', {
+        description: error instanceof Error ? error.message : 'Verifique a conexao e tente novamente.',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleReset = () => {
@@ -328,7 +348,7 @@ export function ComplaintForm() {
             <SelectValue placeholder="Selecione a cidade" />
           </SelectTrigger>
           <SelectContent>
-            {cityHalls.map(ch => (
+            {activeCityHalls.map(ch => (
               <SelectItem key={ch.id} value={ch.id}>
                 {ch.city} — {ch.state}
               </SelectItem>

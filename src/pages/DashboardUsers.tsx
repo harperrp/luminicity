@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
   Users,
@@ -25,7 +25,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { User, UserPermissions, UserRole } from '@/types';
 import { ALL_MODULES, MODULE_CONFIGS, ModuleType } from '@/types/modules';
-import { MOCK_USERS_LIST } from '@/data/mockData';
+import { api } from '@/lib/api';
+import { useCityHall } from '@/contexts/CityHallContext';
 import { getDefaultPermissions, normalizeUserPermissions, roleDescriptions, roleLabels, selectableUserRoles } from '@/lib/permissions';
 import { toast } from 'sonner';
 
@@ -213,12 +214,14 @@ function UserActionsMenu({
 }
 
 export default function DashboardUsers() {
-  const [users, setUsers] = useState<User[]>(MOCK_USERS_LIST);
+  const { activeCityHall } = useCityHall();
+  const [users, setUsers] = useState<User[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
 
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('FIELD_LIGHTING');
   const [newPermissions, setNewPermissions] = useState<UserPermissions>(getDefaultPermissions('FIELD_LIGHTING'));
 
@@ -228,6 +231,12 @@ export default function DashboardUsers() {
   const [editEmail, setEditEmail] = useState('');
   const [editRole, setEditRole] = useState<UserRole>('FIELD_LIGHTING');
   const [editPermissions, setEditPermissions] = useState<UserPermissions>(getDefaultPermissions('FIELD_LIGHTING'));
+
+  useEffect(() => {
+    api.getUsers()
+      .then(setUsers)
+      .catch(() => toast.error('Nao foi possivel carregar usuarios da API.'));
+  }, []);
 
   const filteredUsers = users.filter(user =>
     user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -249,9 +258,9 @@ export default function DashboardUsers() {
     setPermissions(getDefaultPermissions(role));
   };
 
-  const handleCreate = () => {
-    if (!newName || !newEmail) {
-      toast.error('Preencha nome e e-mail.');
+  const handleCreate = async () => {
+    if (!newName || !newEmail || !newPassword) {
+      toast.error('Preencha nome, e-mail e senha.');
       return;
     }
     if (newPermissions.modules.length === 0) {
@@ -259,24 +268,27 @@ export default function DashboardUsers() {
       return;
     }
 
-    const id = String(users.length + 1);
-    setUsers(prev => [
-      ...prev,
-      {
-        id,
+    try {
+      const created = await api.createUser({
         name: newName,
         email: newEmail,
+        password: newPassword,
         role: newRole,
         permissions: newPermissions,
-        cityHallId: '1',
-        createdAt: new Date(),
-      },
-    ]);
-    toast.success('Usuario criado!', { description: roleLabels[newRole] });
-    setCreateOpen(false);
-    setNewName('');
-    setNewEmail('');
-    setRoleDefaults('FIELD_LIGHTING', setNewRole, setNewPermissions);
+        cityHallId: activeCityHall.id,
+      });
+      setUsers(prev => [...prev, created]);
+      toast.success('Usuario criado!', { description: roleLabels[newRole] });
+      setCreateOpen(false);
+      setNewName('');
+      setNewEmail('');
+      setNewPassword('');
+      setRoleDefaults('FIELD_LIGHTING', setNewRole, setNewPermissions);
+    } catch (error) {
+      toast.error('Nao foi possivel criar usuario', {
+        description: error instanceof Error ? error.message : 'Verifique a API.',
+      });
+    }
   };
 
   const openEdit = (user: User) => {
@@ -288,27 +300,40 @@ export default function DashboardUsers() {
     setEditOpen(true);
   };
 
-  const handleEdit = () => {
+  const handleEdit = async () => {
     if (!editUser || !editName || !editEmail) return;
     if (editPermissions.modules.length === 0) {
       toast.error('Selecione ao menos um modulo.');
       return;
     }
 
-    setUsers(prev =>
-      prev.map(user =>
-        user.id === editUser.id
-          ? { ...user, name: editName, email: editEmail, role: editRole, permissions: editPermissions }
-          : user
-      )
-    );
-    toast.success('Usuario atualizado!');
-    setEditOpen(false);
+    try {
+      const updated = await api.updateUser(editUser.id, {
+        name: editName,
+        email: editEmail,
+        role: editRole,
+        permissions: editPermissions,
+      });
+      setUsers(prev => prev.map(user => user.id === editUser.id ? updated : user));
+      toast.success('Usuario atualizado!');
+      setEditOpen(false);
+    } catch (error) {
+      toast.error('Nao foi possivel atualizar usuario', {
+        description: error instanceof Error ? error.message : 'Verifique a API.',
+      });
+    }
   };
 
-  const handleDeactivate = (user: User) => {
-    setUsers(prev => prev.filter(item => item.id !== user.id));
-    toast.success('Usuario desativado.', { description: user.name });
+  const handleDeactivate = async (user: User) => {
+    try {
+      await api.deleteUser(user.id);
+      setUsers(prev => prev.filter(item => item.id !== user.id));
+      toast.success('Usuario desativado.', { description: user.name });
+    } catch (error) {
+      toast.error('Nao foi possivel desativar usuario', {
+        description: error instanceof Error ? error.message : 'Verifique a API.',
+      });
+    }
   };
 
   return (
@@ -477,6 +502,15 @@ export default function DashboardUsers() {
               <div className="space-y-2">
                 <Label>E-mail *</Label>
                 <Input type="email" placeholder="email@cidade.gov.br" value={newEmail} onChange={event => setNewEmail(event.target.value)} />
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Senha temporaria *</Label>
+                <Input
+                  type="password"
+                  placeholder="Minimo de 6 caracteres"
+                  value={newPassword}
+                  onChange={event => setNewPassword(event.target.value)}
+                />
               </div>
             </div>
             <div className="space-y-2">

@@ -1,5 +1,7 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { ModuleType, ALL_MODULES, Occurrence, OccurrenceStatus } from '@/types/modules';
+import { api } from '@/lib/api';
+import { toast } from 'sonner';
 
 interface ModulesContextValue {
   // Active modules per city hall
@@ -197,12 +199,35 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
   const [currentModule, setCurrentModule] = useState<ModuleType>('ILUMINACAO');
   const [occurrences, setOccurrences] = useState<Occurrence[]>(MOCK_OCCURRENCES);
 
+  useEffect(() => {
+    api.getActiveModules()
+      .then(modules => {
+        if (Object.keys(modules).length > 0) {
+          setActiveModulesMap(modules);
+        }
+      })
+      .catch(() => undefined);
+
+    api.getOccurrences()
+      .then(items => {
+        if (items.length > 0) {
+          setOccurrences(items);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
   const getActiveModules = useCallback((cityHallId: string): ModuleType[] => {
     return activeModulesMap[cityHallId] || ['ILUMINACAO'];
   }, [activeModulesMap]);
 
-  const setActiveModules = useCallback((cityHallId: string, modules: ModuleType[]) => {
+  const setActiveModules = useCallback(async (cityHallId: string, modules: ModuleType[]) => {
     setActiveModulesMap(prev => ({ ...prev, [cityHallId]: modules }));
+    try {
+      await api.setActiveModules(cityHallId, modules);
+    } catch {
+      toast.error('Modulos salvos apenas localmente', { description: 'Verifique a conexao com a API.' });
+    }
   }, []);
 
   const isModuleActive = useCallback((cityHallId: string, moduleType: ModuleType): boolean => {
@@ -214,12 +239,17 @@ export function ModulesProvider({ children }: { children: ReactNode }) {
     setOccurrences(prev => [occurrence, ...prev]);
   }, []);
 
-  const updateOccurrenceStatus = useCallback((id: string, status: OccurrenceStatus, resolution?: string) => {
+  const updateOccurrenceStatus = useCallback(async (id: string, status: OccurrenceStatus, resolution?: string) => {
     setOccurrences(prev => prev.map(o => 
       o.id === id 
         ? { ...o, status, resolution, updatedAt: new Date(), resolvedAt: status === 'RESOLVIDA' ? new Date() : o.resolvedAt }
         : o
     ));
+    try {
+      await api.updateOccurrenceStatus(id, status, resolution);
+    } catch {
+      toast.error('Ocorrencia atualizada apenas localmente', { description: 'Verifique a conexao com a API.' });
+    }
   }, []);
 
   const getModuleOccurrences = useCallback((moduleType: ModuleType, cityHallId?: string): Occurrence[] => {

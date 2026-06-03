@@ -12,14 +12,23 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'sonner';
+import { api } from '@/lib/api';
+import { useCityHall } from '@/contexts/CityHallContext';
 
 export default function DashboardComplaints() {
+  const { activeCityHall } = useCityHall();
   const [statusFilter, setStatusFilter] = useState('all');
   const [bannedEntries, setBannedEntries] = useState<BannedCpfEntry[]>([]);
 
   const bannedCpfs = new Set(bannedEntries.map(e => e.cpf));
+
+  useEffect(() => {
+    api.getBannedCpfs(activeCityHall.id)
+      .then(setBannedEntries)
+      .catch(() => undefined);
+  }, [activeCityHall.id]);
 
   const handleBanCpf = useCallback((cpf: string, name: string) => {
     setBannedEntries(prev => {
@@ -34,14 +43,20 @@ export default function DashboardComplaints() {
         },
       ];
     });
+    api.banCpf(activeCityHall.id, cpf, name).catch(() => {
+      toast.error('CPF bloqueado apenas localmente', { description: 'Verifique a conexao com a API.' });
+    });
     toast.success(`CPF ${cpf} banido com sucesso`, {
       description: `Denúncias de ${name} serão bloqueadas.`,
     });
-  }, []);
+  }, [activeCityHall.id]);
 
   const handleUnbanCpf = useCallback((cpf: string) => {
     setBannedEntries(prev => prev.filter(e => e.cpf !== cpf));
-  }, []);
+    api.unbanCpf(activeCityHall.id, cpf).catch(() => {
+      toast.error('Desbloqueio aplicado apenas localmente', { description: 'Verifique a conexao com a API.' });
+    });
+  }, [activeCityHall.id]);
 
   return (
     <DashboardLayout>

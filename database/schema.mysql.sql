@@ -235,6 +235,7 @@ CREATE TABLE maintenance_orders (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   resolved_at TIMESTAMP NULL,
+  UNIQUE KEY uq_maintenance_complaint (complaint_id),
   KEY idx_maintenance_city_status (city_hall_id, status),
   KEY idx_maintenance_assigned_user (assigned_user_id, status),
   CONSTRAINT fk_maintenance_city_hall

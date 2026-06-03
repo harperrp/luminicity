@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,8 @@ import {
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
+import { api } from '@/lib/api';
+import { useCityHall } from '@/contexts/CityHallContext';
 
 interface PoleFailureStats {
   failuresTotal: number;
@@ -123,6 +125,7 @@ const buildRoute = (items: MaintenanceItem[], start: { latitude: number; longitu
 };
 
 export default function DashboardMaintenance() {
+  const { activeCityHall } = useCityHall();
   const [poles, setPoles] = useState<Pole[]>(INITIAL_POLES);
   const [failureStats] = useState<Record<string, PoleFailureStats>>(INITIAL_FAILURE_STATS);
   const [items, setItems] = useState<MaintenanceItem[]>(INITIAL_MAINTENANCE);
@@ -131,6 +134,31 @@ export default function DashboardMaintenance() {
   const [observations, setObservations] = useState('');
   const [currentPosition, setCurrentPosition] = useState({ latitude: -15.3983, longitude: -42.3097 });
   const [activeRoute, setActiveRoute] = useState<RoutePoint[] | undefined>(undefined);
+
+  useEffect(() => {
+    setCurrentPosition({ latitude: activeCityHall.latitude, longitude: activeCityHall.longitude });
+
+    api.getPoles(activeCityHall.id)
+      .then(items => {
+        if (items.length > 0) setPoles(items);
+      })
+      .catch(() => undefined);
+
+    api.getMaintenanceOrders(activeCityHall.id, 'ILUMINACAO')
+      .then(orders => {
+        setItems(orders.map(order => ({
+          id: order.id,
+          poleId: order.poleId ?? `OS-${order.id}`,
+          address: order.address || order.description,
+          latitude: order.latitude,
+          longitude: order.longitude,
+          reportedAt: order.createdAt,
+          priority: order.priority,
+          description: order.description,
+        })));
+      })
+      .catch(() => undefined);
+  }, [activeCityHall.id, activeCityHall.latitude, activeCityHall.longitude]);
 
   const criticalAlerts = useMemo(
     () => Object.entries(failureStats).filter(([, stats]) => stats.failuresTotal >= 5 || stats.failuresLast30Days >= 2).length,
@@ -149,17 +177,24 @@ export default function DashboardMaintenance() {
     return total;
   }, [suggestedRoute, currentPosition]);
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
     if (!selectedItem) return;
 
-    setItems((prev) => prev.filter((item) => item.id !== selectedItem.id));
-    setPoles((prev) => prev.map((pole) => pole.id === selectedItem.poleId ? { ...pole, status: 'FUNCIONANDO', updatedAt: new Date() } : pole));
-    setDialogOpen(false);
-    setObservations('');
+    try {
+      await api.completeMaintenanceOrder(selectedItem.id, observations);
+      setItems((prev) => prev.filter((item) => item.id !== selectedItem.id));
+      setPoles((prev) => prev.map((pole) => pole.id === selectedItem.poleId ? { ...pole, status: 'FUNCIONANDO', updatedAt: new Date() } : pole));
+      setDialogOpen(false);
+      setObservations('');
 
-    toast.success('Manutenção concluída!', {
-      description: `Poste ${selectedItem.poleId} marcado como consertado.`,
-    });
+      toast.success('Manutencao concluida!', {
+        description: `Poste ${selectedItem.poleId} marcado como consertado.`,
+      });
+    } catch (error) {
+      toast.error('Nao foi possivel concluir na API', {
+        description: error instanceof Error ? error.message : 'Verifique a conexao.',
+      });
+    }
   };
 
   const formatDate = (date: Date) => {

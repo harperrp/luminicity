@@ -1,7 +1,11 @@
 .env
 .env.*
 !.env.example
+node_modules/
+dist/
+build/
 admin/config.local
 api/config.local.php
+api/config.php
 *.log
 Thumbs.db

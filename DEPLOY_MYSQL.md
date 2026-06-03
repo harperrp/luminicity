@@ -1,172 +1,121 @@
-# Plano para colocar o IluminaCity em produção com MySQL
+# Deploy do IluminaCity em hospedagem PHP/MySQL
 
-## Situação atual do projeto
+Este projeto agora segue o mesmo modelo pratico do painel da camara: frontend React compilado, pasta `api/` em PHP e banco MySQL/MariaDB na hospedagem.
 
-O projeto atual é um frontend Vite + React + TypeScript. Ele já possui telas, rotas protegidas, painel, módulos e dados de demonstração, mas ainda não está pronto como sistema real de produção porque:
-
-- o login está simulado no frontend;
-- usuários e senhas demo estão dentro do código;
-- postes, denúncias e demais dados ainda usam mocks/contextos locais;
-- não existe backend persistente conectado ao MySQL;
-- o frontend não deve conectar diretamente ao banco de dados.
-
-## Caminho correto para produção
-
-Arquitetura recomendada:
+## Arquitetura
 
 ```txt
-Navegador do usuário
-   ↓
-Frontend React/Vite compilado em /dist
-   ↓ HTTPS
-API backend na hospedagem
-   ↓ conexão privada
-MySQL
+Navegador
+  -> React/Vite compilado em dist/
+  -> /api/*.php
+  -> MySQL/MariaDB
 ```
 
-## O que subir no GitHub
+O React nunca acessa o MySQL diretamente. Toda leitura e escrita passa pela API PHP.
 
-Subir:
+## 1. Criar o banco
 
-- `src/`
-- `public/`
-- `package.json`
-- `package-lock.json`
-- `vite.config.ts`
-- `tsconfig*.json`
-- `tailwind.config.ts`
-- `postcss.config.js`
-- `components.json`
-- `.gitignore`
-- `README.md`
-- documentação do projeto
+No phpMyAdmin ou painel da hospedagem:
 
-Não subir:
+1. Crie o banco `radgov_city_light` ou outro nome desejado.
+2. Importe `database/schema.mysql.sql`.
+3. Importe `database/seed.mysql.sql` para criar dados iniciais.
 
-- `node_modules/`
-- `dist/`
-- `build/`
-- `.env`
-- `.env.*`, exceto `.env.example`
-- logs
-- arquivos de backup `.zip`, `.rar`, `.7z`
-- dumps de banco `.sql`
-- arquivos locais de configuração da hospedagem
-- senhas, tokens, chaves ou credenciais
+Usuarios iniciais do seed:
 
-## Comandos locais
+- `admin@sistema.gov.br`
+- `prefeitura@cidade.gov.br`
+- `secretario@cidade.gov.br`
+- `tecnico@cidade.gov.br`
+- `iluminacao@cidade.gov.br`
+
+Senha temporaria de todos: `Admin@123456`
+
+Troque as senhas imediatamente apos o primeiro acesso.
+
+## 2. Configurar a API
+
+Na hospedagem, copie:
+
+```txt
+api/config.example.php -> api/config.php
+```
+
+Edite `api/config.php` com dados reais:
+
+```php
+<?php
+return [
+  'db_host' => 'localhost',
+  'db_port' => '3306',
+  'db_name' => 'radgov_city_light',
+  'db_user' => 'usuario_do_banco',
+  'db_pass' => 'senha_do_banco',
+  'session_name' => 'luminicity_admin',
+  'allowed_origins' => [],
+];
+```
+
+O arquivo `api/config.php` esta no `.gitignore` e nao deve ser enviado ao GitHub com senhas reais.
+
+## 3. Compilar o frontend
+
+Localmente:
 
 ```sh
 npm install
-npm run dev
 npm run build
 ```
 
-A pasta `node_modules` é recriada com `npm install`. Ela não deve ser enviada ao GitHub.
+Para deploy no mesmo dominio da API, mantenha:
 
-## Variáveis de ambiente sugeridas
+```env
+VITE_API_URL=/api
+```
 
-Crie um arquivo `.env.example` sem senhas reais:
+Se a API ficar em outro subdominio durante testes, ajuste `.env` antes do build:
 
 ```env
 VITE_API_URL=https://seudominio.com.br/api
 ```
 
-No servidor/backend, use variáveis privadas como:
+## 4. Enviar arquivos para hospedagem
 
-```env
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=nome_do_banco
-DB_USER=usuario_do_banco
-DB_PASSWORD=senha_forte_aqui
-JWT_SECRET=troque_esta_chave
-```
+Envie para a raiz publica da hospedagem:
 
-Nunca coloque essas credenciais dentro do React.
+- conteudo da pasta `dist/`;
+- pasta `api/`.
 
-## Próximas tarefas para o Codex
+Nao envie:
 
-1. Criar uma API backend separada para autenticação e dados reais.
-2. Remover dependência de `MOCK_USERS` no `AuthContext`.
-3. Trocar `MOCK_POLES` e demais mocks por chamadas HTTP para API.
-4. Criar migrations SQL para tabelas principais.
-5. Implementar login com senha criptografada e token de sessão.
-6. Adicionar controle multi-prefeitura por `city_hall_id`.
-7. Criar endpoints para denúncias, postes, manutenção, usuários, prefeituras e relatórios.
-8. Preparar deploy do frontend compilado e API na hospedagem.
+- `node_modules/`;
+- `.env`;
+- `api/config.php` com senha real para repositorio publico;
+- arquivos `.sql` se a hospedagem publica permitir download direto deles.
 
-## Modelo inicial de tabelas MySQL
+## 5. Endpoints implementados
 
-```sql
-CREATE TABLE city_halls (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(150) NOT NULL,
-  state VARCHAR(2) NOT NULL,
-  city VARCHAR(120) NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+- `api/auth.php`
+- `api/city-halls.php`
+- `api/modules.php`
+- `api/poles.php`
+- `api/complaints.php`
+- `api/maintenance.php`
+- `api/users.php`
+- `api/banned-cpfs.php`
 
-CREATE TABLE users (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  city_hall_id INT NULL,
-  name VARCHAR(150) NOT NULL,
-  email VARCHAR(180) NOT NULL UNIQUE,
-  password_hash VARCHAR(255) NOT NULL,
-  role VARCHAR(50) NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (city_hall_id) REFERENCES city_halls(id)
-);
+Fluxos ja conectados ao MySQL:
 
-CREATE TABLE poles (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  city_hall_id INT NOT NULL,
-  code VARCHAR(80) NOT NULL,
-  latitude DECIMAL(10, 8) NOT NULL,
-  longitude DECIMAL(11, 8) NOT NULL,
-  status VARCHAR(40) NOT NULL DEFAULT 'WORKING',
-  address VARCHAR(255) NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (city_hall_id) REFERENCES city_halls(id)
-);
+- login por sessao PHP;
+- prefeituras e modulos ativos;
+- usuarios e permissoes;
+- postes, importacao e status;
+- denuncia publica;
+- aprovacao/rejeicao de denuncias;
+- CPFs bloqueados;
+- ordens de manutencao criadas ao aprovar denuncia;
+- conclusao de manutencao atualizando o poste.
 
-CREATE TABLE complaints (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  city_hall_id INT NOT NULL,
-  pole_id INT NULL,
-  citizen_name VARCHAR(150) NOT NULL,
-  citizen_cpf VARCHAR(20) NULL,
-  citizen_phone VARCHAR(30) NULL,
-  description TEXT NOT NULL,
-  latitude DECIMAL(10, 8) NOT NULL,
-  longitude DECIMAL(11, 8) NOT NULL,
-  status VARCHAR(40) NOT NULL DEFAULT 'PENDING',
-  rejection_reason TEXT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (city_hall_id) REFERENCES city_halls(id),
-  FOREIGN KEY (pole_id) REFERENCES poles(id)
-);
+## Observacoes
 
-CREATE TABLE maintenance_orders (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  city_hall_id INT NOT NULL,
-  complaint_id INT NULL,
-  pole_id INT NULL,
-  assigned_user_id INT NULL,
-  priority VARCHAR(20) NOT NULL DEFAULT 'MEDIUM',
-  status VARCHAR(40) NOT NULL DEFAULT 'OPEN',
-  notes TEXT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (city_hall_id) REFERENCES city_halls(id),
-  FOREIGN KEY (complaint_id) REFERENCES complaints(id),
-  FOREIGN KEY (pole_id) REFERENCES poles(id),
-  FOREIGN KEY (assigned_user_id) REFERENCES users(id)
-);
-```
-
-## Observação sobre multi-tenant
-
-O README fala em banco separado por município. Isso é mais seguro, mas mais complexo. Para começar mais rápido na hospedagem, uma primeira versão pode usar um banco único com coluna `city_hall_id` em todas as tabelas e regras fortes na API. Depois, se necessário, evolui para banco separado por prefeitura.
+O projeto ainda mantem alguns mocks como fallback visual para desenvolvimento sem API configurada e para relatorios historicos. Em producao, configure a API e importe o seed para usar os dados reais.

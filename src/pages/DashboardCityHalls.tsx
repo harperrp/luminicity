@@ -144,8 +144,8 @@ export default function DashboardCityHalls() {
     }
 
     const id = String(Date.now());
-    addCityHall({ id, name: newName, city: newCity, state: newState, planId: newPlanId, poleLimit: sanitizedNewPoleLimit, latitude, longitude, cnpj: newCnpj, status: 'ATIVO', createdAt: new Date(), usersCount: 0, polesCount: 0 });
-    setActiveModules(id, newModules);
+    const created = await addCityHall({ id, name: newName, city: newCity, state: newState, planId: newPlanId, poleLimit: sanitizedNewPoleLimit, latitude, longitude, cnpj: newCnpj, status: 'ATIVO', createdAt: new Date(), usersCount: 0, polesCount: 0 });
+    await setActiveModules(created.id, newModules);
     toast.success('Prefeitura cadastrada!', { description: `${newCity}/${newState}` });
     setCreateOpen(false);
     setNewName(''); setNewCep(''); setNewCity(''); setNewState(''); setNewCnpj(''); setNewPlanId('STARTER'); setNewPoleLimit(getDefaultPoleLimit('STARTER')); setNewCoords(null); setNewModules([...ALL_MODULES]);
@@ -184,8 +184,8 @@ export default function DashboardCityHalls() {
       } catch { /* keep original coords */ }
     }
 
-    updateCityHall(editId, updates);
-    setActiveModules(editId, editModules);
+    await updateCityHall(editId, updates);
+    await setActiveModules(editId, editModules);
     toast.success('Prefeitura atualizada!');
     setEditOpen(false);
   };

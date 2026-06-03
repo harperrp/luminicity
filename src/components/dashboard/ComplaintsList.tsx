@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MapPin, Clock, CheckCircle, XCircle, AlertCircle, Eye, Ban } from 'lucide-react';
 import { Complaint, ComplaintStatus, REJECTION_REASONS } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,8 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { api } from '@/lib/api';
+import { useCityHall } from '@/contexts/CityHallContext';
 
 // Mock data
 const MOCK_COMPLAINTS: Complaint[] = [
@@ -79,6 +81,7 @@ interface ComplaintsListProps {
 const EMPTY_SET = new Set<string>();
 
 export function ComplaintsList({ bannedCpfs = EMPTY_SET, onBanCpf = () => {}, onUnbanCpf = () => {} }: ComplaintsListProps) {
+  const { activeCityHall } = useCityHall();
   const [complaints, setComplaints] = useState<Complaint[]>(MOCK_COMPLAINTS);
   const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -86,6 +89,12 @@ export function ComplaintsList({ bannedCpfs = EMPTY_SET, onBanCpf = () => {}, on
   const [action, setAction] = useState<'view' | 'approve' | 'reject'>('view');
   const [rejectionReason, setRejectionReason] = useState('');
   const [observations, setObservations] = useState('');
+
+  useEffect(() => {
+    api.getComplaints({ cityHallId: activeCityHall.id, moduleId: 'ILUMINACAO' })
+      .then(items => setComplaints(items))
+      .catch(() => undefined);
+  }, [activeCityHall.id]);
 
   const handleAction = (complaint: Complaint, actionType: 'view' | 'approve' | 'reject') => {
     setSelectedComplaint(complaint);
@@ -95,34 +104,46 @@ export function ComplaintsList({ bannedCpfs = EMPTY_SET, onBanCpf = () => {}, on
     setObservations('');
   };
 
-  const handleApprove = () => {
+  const handleApprove = async () => {
     if (selectedComplaint) {
-      setComplaints(prev =>
-        prev.map(c =>
-          c.id === selectedComplaint.id
-            ? { ...c, status: 'APROVADA' as ComplaintStatus, secretaryObservations: observations, updatedAt: new Date() }
-            : c
-        )
-      );
+      try {
+        const saved = await api.approveComplaint(selectedComplaint.id, observations);
+        setComplaints(prev => prev.map(c => c.id === selectedComplaint.id ? saved : c));
+      } catch {
+        setComplaints(prev =>
+          prev.map(c =>
+            c.id === selectedComplaint.id
+              ? { ...c, status: 'APROVADA' as ComplaintStatus, secretaryObservations: observations, updatedAt: new Date() }
+              : c
+          )
+        );
+        toast.error('Denuncia atualizada apenas localmente', { description: 'Verifique a conexao com a API.' });
+      }
       setDialogOpen(false);
     }
   };
 
-  const handleReject = () => {
+  const handleReject = async () => {
     if (selectedComplaint && rejectionReason) {
-      setComplaints(prev =>
-        prev.map(c =>
-          c.id === selectedComplaint.id
-            ? {
-                ...c,
-                status: 'REJEITADA' as ComplaintStatus,
-                rejectionReason,
-                secretaryObservations: observations,
-                updatedAt: new Date(),
-              }
-            : c
-        )
-      );
+      try {
+        const saved = await api.rejectComplaint(selectedComplaint.id, rejectionReason, observations);
+        setComplaints(prev => prev.map(c => c.id === selectedComplaint.id ? saved : c));
+      } catch {
+        setComplaints(prev =>
+          prev.map(c =>
+            c.id === selectedComplaint.id
+              ? {
+                  ...c,
+                  status: 'REJEITADA' as ComplaintStatus,
+                  rejectionReason,
+                  secretaryObservations: observations,
+                  updatedAt: new Date(),
+                }
+              : c
+          )
+        );
+        toast.error('Denuncia atualizada apenas localmente', { description: 'Verifique a conexao com a API.' });
+      }
       setDialogOpen(false);
     }
   };

@@ -19,10 +19,11 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { ComplaintStatus, REJECTION_REASONS } from '@/types';
+import { api } from '@/lib/api';
 
 interface ModuleComplaint {
   id: string;
@@ -105,17 +106,33 @@ export default function ModuleComplaints() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [observations, setObservations] = useState('');
 
+  useEffect(() => {
+    api.getComplaints({ cityHallId: activeCityHall.id, moduleId: currentModule })
+      .then(items => setComplaints(items))
+      .catch(() => undefined);
+
+    api.getBannedCpfs(activeCityHall.id)
+      .then(setBannedEntries)
+      .catch(() => undefined);
+  }, [activeCityHall.id, currentModule]);
+
   const handleBanCpf = useCallback((cpf: string, name: string) => {
     setBannedEntries(prev => {
       if (prev.some(e => e.cpf === cpf)) return prev;
       return [...prev, { cpf, name, bannedAt: new Date(), complaintsCount: 1 }];
     });
+    api.banCpf(activeCityHall.id, cpf, name).catch(() => {
+      toast.error('CPF bloqueado apenas localmente', { description: 'Verifique a conexao com a API.' });
+    });
     toast.success(`CPF ${cpf} banido com sucesso`, { description: `Denúncias de ${name} serão bloqueadas.` });
-  }, []);
+  }, [activeCityHall.id]);
 
   const handleUnbanCpf = useCallback((cpf: string) => {
     setBannedEntries(prev => prev.filter(e => e.cpf !== cpf));
-  }, []);
+    api.unbanCpf(activeCityHall.id, cpf).catch(() => {
+      toast.error('Desbloqueio aplicado apenas localmente', { description: 'Verifique a conexao com a API.' });
+    });
+  }, [activeCityHall.id]);
 
   const handleAction = (complaint: ModuleComplaint, actionType: 'view' | 'approve' | 'reject') => {
     setSelectedComplaint(complaint);
@@ -125,18 +142,30 @@ export default function ModuleComplaints() {
     setObservations('');
   };
 
-  const handleApprove = () => {
+  const handleApprove = async () => {
     if (!selectedComplaint) return;
-    setComplaints(prev => prev.map(c => c.id === selectedComplaint.id ? { ...c, status: 'APROVADA' as ComplaintStatus, updatedAt: new Date() } : c));
+    try {
+      const saved = await api.approveComplaint(selectedComplaint.id, observations);
+      setComplaints(prev => prev.map(c => c.id === selectedComplaint.id ? saved : c));
+      toast.success('Denuncia aprovada!');
+    } catch {
+      setComplaints(prev => prev.map(c => c.id === selectedComplaint.id ? { ...c, status: 'APROVADA' as ComplaintStatus, updatedAt: new Date() } : c));
+      toast.error('Denuncia atualizada apenas localmente', { description: 'Verifique a conexao com a API.' });
+    }
     setDialogOpen(false);
-    toast.success('Denúncia aprovada!');
   };
 
-  const handleReject = () => {
+  const handleReject = async () => {
     if (!selectedComplaint || !rejectionReason) return;
-    setComplaints(prev => prev.map(c => c.id === selectedComplaint.id ? { ...c, status: 'REJEITADA' as ComplaintStatus, rejectionReason, updatedAt: new Date() } : c));
+    try {
+      const saved = await api.rejectComplaint(selectedComplaint.id, rejectionReason, observations);
+      setComplaints(prev => prev.map(c => c.id === selectedComplaint.id ? saved : c));
+      toast.success('Denuncia rejeitada.');
+    } catch {
+      setComplaints(prev => prev.map(c => c.id === selectedComplaint.id ? { ...c, status: 'REJEITADA' as ComplaintStatus, rejectionReason, updatedAt: new Date() } : c));
+      toast.error('Denuncia atualizada apenas localmente', { description: 'Verifique a conexao com a API.' });
+    }
     setDialogOpen(false);
-    toast.success('Denúncia rejeitada.');
   };
 
   const confirmBan = () => {
