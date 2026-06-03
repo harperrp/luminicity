@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { Navigate } from 'react-router-dom';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { ModuleSelector } from '@/components/modules/ModuleSelector';
 import { StatsCard } from '@/components/dashboard/StatsCard';
@@ -24,7 +25,7 @@ export default function ModuleDashboard() {
 
   // Skip ILUMINACAO — it uses the original dashboard
   if (currentModule === 'ILUMINACAO') {
-    return null; // handled by existing Dashboard
+    return <Navigate to="/dashboard" replace />;
   }
 
   const occurrences = getModuleOccurrences(currentModule, activeCityHall.id);

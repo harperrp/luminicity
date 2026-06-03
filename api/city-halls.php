@@ -90,7 +90,7 @@ if ($method === 'PUT' || $method === 'PATCH') {
          SET name = COALESCE(?, name),
              city = COALESCE(?, city),
              state = COALESCE(?, state),
-             cnpj = ?,
+             cnpj = COALESCE(?, cnpj),
              status = COALESCE(?, status),
              plan_id = COALESCE(?, plan_id),
              pole_limit = COALESCE(?, pole_limit),

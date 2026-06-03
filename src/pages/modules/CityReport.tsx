@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useModules } from '@/contexts/ModulesContext';
 import { useCityHall } from '@/contexts/CityHallContext';
+import { usePoles } from '@/contexts/PolesContext';
 import { MODULE_CONFIGS, ALL_MODULES } from '@/types/modules';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -13,11 +14,14 @@ import {
 } from 'recharts';
 import { FileText, Download, Calendar, Building2, MapPin, Clock } from 'lucide-react';
 import { toast } from 'sonner';
-import { MOCK_POLE_HISTORY } from '@/data/mockData';
+import { api } from '@/lib/api';
+import { Complaint } from '@/types';
 
 export default function CityReport() {
   const { occurrences, getActiveModules, isModuleActive } = useModules();
   const { activeCityHall } = useCityHall();
+  const { poles } = usePoles();
+  const [lightingComplaints, setLightingComplaints] = useState<Complaint[]>([]);
 
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date();
@@ -25,6 +29,26 @@ export default function CityReport() {
   });
 
   const activeModules = getActiveModules(activeCityHall.id);
+  const cityPoles = useMemo(
+    () => poles.filter((pole) => pole.cityHallId === activeCityHall.id),
+    [poles, activeCityHall.id],
+  );
+
+  useEffect(() => {
+    let mounted = true;
+
+    api.getComplaints({ cityHallId: activeCityHall.id, moduleId: 'ILUMINACAO' })
+      .then((items) => {
+        if (mounted) setLightingComplaints(items);
+      })
+      .catch(() => {
+        if (mounted) setLightingComplaints([]);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [activeCityHall.id]);
 
   const monthLabel = (key: string) => {
     const [y, m] = key.split('-');
@@ -37,13 +61,21 @@ export default function CityReport() {
     occurrences.forEach(o => {
       months.add(`${o.createdAt.getFullYear()}-${String(o.createdAt.getMonth() + 1).padStart(2, '0')}`);
     });
-    MOCK_POLE_HISTORY.forEach(h => {
-      months.add(`${h.dateQueimado.getFullYear()}-${String(h.dateQueimado.getMonth() + 1).padStart(2, '0')}`);
+    lightingComplaints.forEach(complaint => {
+      months.add(`${complaint.createdAt.getFullYear()}-${String(complaint.createdAt.getMonth() + 1).padStart(2, '0')}`);
+      if (complaint.status !== 'PENDENTE') {
+        months.add(`${complaint.updatedAt.getFullYear()}-${String(complaint.updatedAt.getMonth() + 1).padStart(2, '0')}`);
+      }
+    });
+    cityPoles.forEach(pole => {
+      if (pole.status === 'QUEIMADO') {
+        months.add(`${pole.updatedAt.getFullYear()}-${String(pole.updatedAt.getMonth() + 1).padStart(2, '0')}`);
+      }
     });
     const now = new Date();
     months.add(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
     return Array.from(months).sort().reverse();
-  }, [occurrences]);
+  }, [occurrences, lightingComplaints, cityPoles]);
 
   const report = useMemo(() => {
     const [y, m] = selectedMonth.split('-').map(Number);
@@ -56,8 +88,20 @@ export default function CityReport() {
     const resolvedInMonth = cityOccurrences.filter(o => o.resolvedAt && o.resolvedAt >= monthStart && o.resolvedAt <= monthEnd);
 
     // Iluminação from pole history
-    const ilumQueimados = MOCK_POLE_HISTORY.filter(h => h.dateQueimado >= monthStart && h.dateQueimado <= monthEnd).length;
-    const ilumConsertados = MOCK_POLE_HISTORY.filter(h => h.dateConsertado && h.dateConsertado >= monthStart && h.dateConsertado <= monthEnd).length;
+    const complaintPoleIds = new Set(lightingComplaints.map(complaint => complaint.poleId).filter(Boolean));
+    const lightingOpenedFromComplaints = lightingComplaints.filter(complaint => complaint.createdAt >= monthStart && complaint.createdAt <= monthEnd).length;
+    const lightingOpenedFromPoles = cityPoles.filter(pole =>
+      pole.status === 'QUEIMADO' &&
+      !complaintPoleIds.has(pole.id) &&
+      pole.updatedAt >= monthStart &&
+      pole.updatedAt <= monthEnd
+    ).length;
+    const ilumQueimados = lightingOpenedFromComplaints + lightingOpenedFromPoles;
+    const ilumConsertados = lightingComplaints.filter(complaint =>
+      complaint.status !== 'PENDENTE' &&
+      complaint.updatedAt >= monthStart &&
+      complaint.updatedAt <= monthEnd
+    ).length;
 
     // By module
     const byModule = activeModules
@@ -109,7 +153,7 @@ export default function CityReport() {
       byModule,
       bairros: Object.entries(bairros).sort((a, b) => b[1] - a[1]).slice(0, 10),
     };
-  }, [selectedMonth, occurrences, activeCityHall.id, activeModules, isModuleActive]);
+  }, [selectedMonth, occurrences, activeCityHall.id, activeModules, isModuleActive, lightingComplaints, cityPoles]);
 
   return (
     <DashboardLayout>

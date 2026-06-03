@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react';
 import { 
   Lightbulb, 
   AlertTriangle, 
@@ -13,6 +14,9 @@ import { ComplaintsList } from '@/components/dashboard/ComplaintsList';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCityHall } from '@/contexts/CityHallContext';
 import { useModules } from '@/contexts/ModulesContext';
+import { usePoles } from '@/contexts/PolesContext';
+import { api } from '@/lib/api';
+import { Complaint } from '@/types';
 import { Navigate } from 'react-router-dom';
 import {
   Card,
@@ -34,24 +38,60 @@ import {
   Cell,
 } from 'recharts';
 
-const statusData = [
-  { name: 'Funcionando', value: 142, color: 'hsl(142, 72%, 35%)' },
-  { name: 'Queimados', value: 34, color: 'hsl(0, 72%, 51%)' },
-];
-
-const monthlyData = [
-  { month: 'Jan', denuncias: 45, resolvidas: 42 },
-  { month: 'Fev', denuncias: 52, resolvidas: 48 },
-  { month: 'Mar', denuncias: 38, resolvidas: 35 },
-  { month: 'Abr', denuncias: 65, resolvidas: 58 },
-  { month: 'Mai', denuncias: 48, resolvidas: 45 },
-  { month: 'Jun', denuncias: 55, resolvidas: 52 },
-];
+const MONTH_LABELS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
 export default function Dashboard() {
   const { canApproveComplaints, canViewReports } = useAuth();
   const { activeCityHall } = useCityHall();
   const { currentModule } = useModules();
+  const { poles } = usePoles();
+  const [complaints, setComplaints] = useState<Complaint[]>([]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    api.getComplaints({ cityHallId: activeCityHall.id, moduleId: 'ILUMINACAO' })
+      .then((items) => {
+        if (mounted) setComplaints(items);
+      })
+      .catch(() => {
+        if (mounted) setComplaints([]);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [activeCityHall.id]);
+
+  const monthlyData = useMemo(() => {
+    const now = new Date();
+
+    return Array.from({ length: 6 }, (_, index) => {
+      const monthDate = new Date(now.getFullYear(), now.getMonth() - 5 + index, 1);
+      const month = monthDate.getMonth();
+      const year = monthDate.getFullYear();
+      const monthComplaints = complaints.filter((complaint) =>
+        complaint.createdAt.getMonth() === month && complaint.createdAt.getFullYear() === year
+      );
+
+      return {
+        month: MONTH_LABELS[month],
+        denuncias: monthComplaints.length,
+        resolvidas: monthComplaints.filter((complaint) => complaint.status !== 'PENDENTE').length,
+      };
+    });
+  }, [complaints]);
+
+  const answeredComplaints = complaints.filter((complaint) => complaint.status !== 'PENDENTE');
+  const averageResponseHours = answeredComplaints.length > 0
+    ? Math.round(answeredComplaints.reduce((total, complaint) => {
+        const diff = complaint.updatedAt.getTime() - complaint.createdAt.getTime();
+        return total + Math.max(diff / (1000 * 60 * 60), 0);
+      }, 0) / answeredComplaints.length)
+    : 0;
+  const averageResponseLabel = averageResponseHours >= 24
+    ? `${Math.round(averageResponseHours / 24)}d`
+    : `${averageResponseHours}h`;
   
   // If not on iluminação, redirect to module dashboard
   if (currentModule !== 'ILUMINACAO') {
@@ -60,6 +100,15 @@ export default function Dashboard() {
 
   const canViewComplaints = canApproveComplaints();
   const canViewFullStats = canViewReports();
+  const cityPoles = poles.filter((pole) => pole.cityHallId === activeCityHall.id);
+  const workingPoles = cityPoles.filter((pole) => pole.status === 'FUNCIONANDO').length;
+  const brokenPoles = cityPoles.filter((pole) => pole.status === 'QUEIMADO').length;
+  const totalPoles = cityPoles.length;
+  const workingPercent = totalPoles > 0 ? ((workingPoles / totalPoles) * 100).toFixed(1) : '0.0';
+  const statusData = [
+    { name: 'Funcionando', value: workingPoles, color: 'hsl(142, 72%, 35%)' },
+    { name: 'Queimados', value: brokenPoles, color: 'hsl(0, 72%, 51%)' },
+  ].filter((entry) => entry.value > 0);
 
   return (
     <DashboardLayout>
@@ -78,34 +127,31 @@ export default function Dashboard() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatsCard
             title="Total de Postes"
-            value="176"
+            value={String(totalPoles)}
             description="Cadastrados no sistema"
             icon={<Lightbulb className="h-6 w-6" />}
             variant="default"
           />
           <StatsCard
             title="Postes Funcionando"
-            value="142"
-            description="80.7% do total"
+            value={String(workingPoles)}
+            description={`${workingPercent}% do total`}
             icon={<CheckCircle className="h-6 w-6" />}
             variant="success"
-            trend={{ value: 5, isPositive: true }}
           />
           <StatsCard
             title="Postes Queimados"
-            value="34"
+            value={String(brokenPoles)}
             description="Aguardando manutenção"
             icon={<AlertTriangle className="h-6 w-6" />}
             variant="destructive"
-            trend={{ value: 12, isPositive: false }}
           />
           <StatsCard
             title="Tempo Médio"
-            value="18h"
+            value={averageResponseLabel}
             description="Para resolução"
             icon={<Clock className="h-6 w-6" />}
             variant="warning"
-            trend={{ value: 8, isPositive: true }}
           />
         </div>
 
@@ -184,7 +230,7 @@ export default function Dashboard() {
             <CardDescription>Visualização geográfica dos postes por status</CardDescription>
           </CardHeader>
           <CardContent>
-            <PoleMap center={[activeCityHall.latitude, activeCityHall.longitude]} />
+            <PoleMap poles={cityPoles} center={[activeCityHall.latitude, activeCityHall.longitude]} />
           </CardContent>
         </Card>
 

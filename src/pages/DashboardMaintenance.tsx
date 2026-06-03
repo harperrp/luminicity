@@ -26,6 +26,7 @@ interface PoleFailureStats {
 
 interface MaintenanceItem {
   id: string;
+  source: 'order' | 'pole';
   poleId: string;
   address: string;
   latitude: number;
@@ -52,6 +53,7 @@ const INITIAL_FAILURE_STATS: Record<string, PoleFailureStats> = {
 const INITIAL_MAINTENANCE: MaintenanceItem[] = [
   {
     id: '1',
+    source: 'order',
     poleId: 'P-001',
     address: 'Av. Principal, 200',
     latitude: -15.3989,
@@ -62,6 +64,7 @@ const INITIAL_MAINTENANCE: MaintenanceItem[] = [
   },
   {
     id: '2',
+    source: 'order',
     poleId: 'P-004',
     address: 'Rua Nova, 75',
     latitude: -15.4002,
@@ -72,6 +75,7 @@ const INITIAL_MAINTENANCE: MaintenanceItem[] = [
   },
   {
     id: '3',
+    source: 'order',
     poleId: 'P-007',
     address: 'Rua das Árvores, 120',
     latitude: -15.3994,
@@ -124,6 +128,21 @@ const buildRoute = (items: MaintenanceItem[], start: { latitude: number; longitu
   return ordered;
 };
 
+const buildMaintenanceFromPoles = (poles: Pole[]): MaintenanceItem[] =>
+  poles
+    .filter((pole) => pole.status === 'QUEIMADO')
+    .map((pole) => ({
+      id: `pole:${pole.id}`,
+      source: 'pole',
+      poleId: pole.id,
+      address: pole.address || pole.neighborhood || 'Poste sem endereco',
+      latitude: pole.latitude,
+      longitude: pole.longitude,
+      reportedAt: pole.updatedAt,
+      priority: 'media',
+      description: `Poste ${pole.id} marcado como queimado.`,
+    }));
+
 export default function DashboardMaintenance() {
   const { activeCityHall } = useCityHall();
   const [poles, setPoles] = useState<Pole[]>(INITIAL_POLES);
@@ -138,16 +157,16 @@ export default function DashboardMaintenance() {
   useEffect(() => {
     setCurrentPosition({ latitude: activeCityHall.latitude, longitude: activeCityHall.longitude });
 
-    api.getPoles(activeCityHall.id)
-      .then(items => {
-        if (items.length > 0) setPoles(items);
-      })
-      .catch(() => undefined);
+    Promise.all([
+      api.getPoles(activeCityHall.id),
+      api.getMaintenanceOrders(activeCityHall.id, 'ILUMINACAO'),
+    ])
+      .then(([loadedPoles, orders]) => {
+        if (loadedPoles.length > 0) setPoles(loadedPoles);
 
-    api.getMaintenanceOrders(activeCityHall.id, 'ILUMINACAO')
-      .then(orders => {
-        setItems(orders.map(order => ({
+        const orderItems: MaintenanceItem[] = orders.map(order => ({
           id: order.id,
+          source: 'order',
           poleId: order.poleId ?? `OS-${order.id}`,
           address: order.address || order.description,
           latitude: order.latitude,
@@ -155,7 +174,12 @@ export default function DashboardMaintenance() {
           reportedAt: order.createdAt,
           priority: order.priority,
           description: order.description,
-        })));
+        }));
+
+        const orderedPoleIds = new Set(orderItems.map((item) => item.poleId));
+        const poleItems = buildMaintenanceFromPoles(loadedPoles).filter((item) => !orderedPoleIds.has(item.poleId));
+
+        setItems([...orderItems, ...poleItems]);
       })
       .catch(() => undefined);
   }, [activeCityHall.id, activeCityHall.latitude, activeCityHall.longitude]);
@@ -181,7 +205,12 @@ export default function DashboardMaintenance() {
     if (!selectedItem) return;
 
     try {
-      await api.completeMaintenanceOrder(selectedItem.id, observations);
+      if (selectedItem.source === 'order') {
+        await api.completeMaintenanceOrder(selectedItem.id, observations);
+      } else {
+        await api.updatePoleStatus(selectedItem.poleId, activeCityHall.id, 'FUNCIONANDO');
+      }
+
       setItems((prev) => prev.filter((item) => item.id !== selectedItem.id));
       setPoles((prev) => prev.map((pole) => pole.id === selectedItem.poleId ? { ...pole, status: 'FUNCIONANDO', updatedAt: new Date() } : pole));
       setDialogOpen(false);
@@ -237,11 +266,29 @@ export default function DashboardMaintenance() {
     toast.info('Rota cancelada.');
   };
 
-  const handleMapStatusChange = (poleId: string, newStatus: PoleStatus) => {
+  const handleMapStatusChange = async (poleId: string, newStatus: PoleStatus) => {
+    const pendingItem = items.find((item) => item.poleId === poleId);
+    const targetPole = poles.find((pole) => pole.id === poleId);
+    const updatedPole = targetPole ? { ...targetPole, status: newStatus, updatedAt: new Date() } : null;
+
     setPoles((prev) => prev.map((pole) => pole.id === poleId ? { ...pole, status: newStatus, updatedAt: new Date() } : pole));
 
     if (newStatus === 'FUNCIONANDO') {
       setItems((prev) => prev.filter((item) => item.poleId !== poleId));
+    } else if (updatedPole && !pendingItem) {
+      setItems((prev) => [...prev, ...buildMaintenanceFromPoles([updatedPole])]);
+    }
+
+    try {
+      if (newStatus === 'FUNCIONANDO' && pendingItem?.source === 'order') {
+        await api.completeMaintenanceOrder(pendingItem.id, 'Concluido pelo mapa de manutencao');
+      } else {
+        await api.updatePoleStatus(poleId, activeCityHall.id, newStatus);
+      }
+    } catch (error) {
+      toast.error('Nao foi possivel atualizar na API', {
+        description: error instanceof Error ? error.message : 'Verifique a conexao.',
+      });
     }
   };
 
