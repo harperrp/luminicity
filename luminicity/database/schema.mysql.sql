@@ -139,6 +139,8 @@ CREATE TABLE poles (
   latitude DECIMAL(10, 7) NOT NULL,
   longitude DECIMAL(10, 7) NOT NULL,
   status ENUM('FUNCIONANDO', 'QUEIMADO') NOT NULL DEFAULT 'FUNCIONANDO',
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  deleted_at TIMESTAMP NULL,
   neighborhood VARCHAR(120) NULL,
   address VARCHAR(255) NULL,
   observations TEXT NULL,
@@ -146,6 +148,7 @@ CREATE TABLE poles (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_poles_city_code (city_hall_id, pole_code),
   KEY idx_poles_city_status (city_hall_id, status),
+  KEY idx_poles_city_active_status (city_hall_id, active, status),
   CONSTRAINT fk_poles_city_hall
     FOREIGN KEY (city_hall_id) REFERENCES city_halls (id)
     ON DELETE CASCADE
@@ -266,5 +269,5 @@ SELECT
   GREATEST(ch.pole_limit - COUNT(p.id), 0) AS remaining_pole_slots
 FROM city_halls ch
 JOIN subscription_plans sp ON sp.id = ch.plan_id
-LEFT JOIN poles p ON p.city_hall_id = ch.id
+LEFT JOIN poles p ON p.city_hall_id = ch.id AND p.active = 1 AND p.deleted_at IS NULL
 GROUP BY ch.id, ch.name, ch.city, ch.state, ch.plan_id, sp.label, ch.pole_limit;

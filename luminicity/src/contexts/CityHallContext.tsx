@@ -1,6 +1,8 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { MOCK_CITY_HALLS_LIST, CityHallWithStats } from '@/data/mockData';
 import { toast } from 'sonner';
+import { apiRequest, normalizeCityHall } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface CityHallContextValue {
   cityHalls: CityHallWithStats[];
@@ -14,8 +16,36 @@ interface CityHallContextValue {
 const CityHallContext = createContext<CityHallContextValue | null>(null);
 
 export function CityHallProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
   const [cityHalls, setCityHalls] = useState<CityHallWithStats[]>(MOCK_CITY_HALLS_LIST);
   const [activeCityHall, setActiveCityHallState] = useState<CityHallWithStats>(MOCK_CITY_HALLS_LIST[0]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+    apiRequest<{ ok: boolean; cityHalls: CityHallWithStats[] }>('/api/city-halls.php')
+      .then((data) => {
+        if (cancelled) return;
+        const realCityHalls = (data.cityHalls ?? []).map(normalizeCityHall);
+        if (realCityHalls.length === 0) return;
+
+        setCityHalls(realCityHalls);
+        setActiveCityHallState((current) => {
+          if (user.cityHallId) {
+            return realCityHalls.find((cityHall) => cityHall.id === user.cityHallId) ?? realCityHalls[0];
+          }
+          return realCityHalls.find((cityHall) => cityHall.id === current.id) ?? realCityHalls[0];
+        });
+      })
+      .catch(() => {
+        // Keep the existing local city list only when the API is unavailable in local development.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   const setActiveCityHall = useCallback((cityHall: CityHallWithStats) => {
     setActiveCityHallState(cityHall);

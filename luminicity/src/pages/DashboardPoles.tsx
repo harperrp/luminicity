@@ -54,48 +54,56 @@ export default function DashboardPoles() {
 
   const canViewHistory = canAccessModule('ILUMINACAO');
 
-  const handleCreatePole = (data: { id: string; address: string; latitude: number; longitude: number; status: PoleStatus }) => {
+  const handleCreatePole = async (data: { id: string; address: string; latitude: number; longitude: number; status: PoleStatus }) => {
     if (poleUsage.isAtLimit) {
       toast.error('Limite de postes atingido.', {
         description: `Esta prefeitura permite ate ${formatPoleLimit(poleLimit)} pontos de poste.`,
       });
-      return;
+      return false;
     }
 
     const newPole: Pole = { ...data, cityHallId: activeCityHall.id, createdAt: new Date(), updatedAt: new Date() };
-    addPole(newPole);
+    const savedPole = await addPole(newPole);
+    if (!savedPole) return false;
+
     updateCityHall(activeCityHall.id, { polesCount: cityPoles.length + 1 });
+    return true;
   };
 
-  const handleImportPoles = (newPoles: Pole[]) => {
+  const handleImportPoles = async (newPoles: Pole[]) => {
     if (newPoles.length > poleUsage.remaining) {
       toast.error('Importacao excede o limite do plano.', {
         description: `Restam ${poleUsage.remaining} pontos no limite contratado.`,
       });
-      return;
+      return false;
     }
 
-    addPoles(newPoles.map(pole => ({ ...pole, cityHallId: activeCityHall.id })));
-    updateCityHall(activeCityHall.id, { polesCount: cityPoles.length + newPoles.length });
+    const savedPoles = await addPoles(newPoles.map(pole => ({ ...pole, cityHallId: activeCityHall.id })));
+    if (savedPoles.length === 0) return false;
+
+    updateCityHall(activeCityHall.id, { polesCount: cityPoles.length + savedPoles.length });
+    return true;
   };
 
   const toggleStatus = (pole: Pole) => {
     setStatusChangeTarget(pole);
   };
 
-  const confirmStatusChange = () => {
+  const confirmStatusChange = async () => {
     if (!statusChangeTarget) return;
     const newStatus: PoleStatus = statusChangeTarget.status === 'FUNCIONANDO' ? 'QUEIMADO' : 'FUNCIONANDO';
-    updatePoleStatus(statusChangeTarget.id, newStatus);
+    const savedPole = await updatePoleStatus(statusChangeTarget.id, newStatus);
+    if (!savedPole) return;
     toast.success(`Status atualizado: ${statusChangeTarget.id}`, {
       description: `Agora está ${newStatus === 'FUNCIONANDO' ? 'consertado' : 'queimado'}.`,
     });
     setStatusChangeTarget(null);
   };
 
-  const handleDeletePole = () => {
+  const handleDeletePole = async () => {
     if (!deleteTarget) return;
-    removePole(deleteTarget.id);
+    const deleted = await removePole(deleteTarget.id);
+    if (!deleted) return;
     updateCityHall(activeCityHall.id, { polesCount: Math.max(cityPoles.length - 1, 0) });
     toast.success(`Poste ${deleteTarget.id} excluído com sucesso.`);
     setDeleteTarget(null);

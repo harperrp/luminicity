@@ -109,6 +109,50 @@ function normalize_date($value): ?string {
     return $value ? date(DATE_ATOM, strtotime((string) $value)) : null;
 }
 
+function db_column_exists(PDO $pdo, string $table, string $column): bool {
+    static $cache = [];
+    $key = $table . '.' . $column;
+
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = ?
+               AND COLUMN_NAME = ?'
+        );
+        $stmt->execute([$table, $column]);
+        $cache[$key] = ((int) $stmt->fetchColumn()) > 0;
+    } catch (Throwable $e) {
+        error_log('Column inspection failed: ' . $e->getMessage());
+        $cache[$key] = false;
+    }
+
+    return $cache[$key];
+}
+
+function pole_active_conditions(PDO $pdo, string $alias = 'poles'): array {
+    $conditions = [];
+
+    if (db_column_exists($pdo, 'poles', 'active')) {
+        $conditions[] = $alias . '.active = 1';
+    }
+
+    if (db_column_exists($pdo, 'poles', 'deleted_at')) {
+        $conditions[] = $alias . '.deleted_at IS NULL';
+    }
+
+    return $conditions;
+}
+
+function pole_active_join_clause(PDO $pdo, string $alias = 'p'): string {
+    $conditions = pole_active_conditions($pdo, $alias);
+    return $conditions ? ' AND ' . implode(' AND ', $conditions) : '';
+}
+
 function map_permission_row(?array $row, array $modules): array {
     return [
         'modules' => $modules,

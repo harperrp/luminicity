@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useState, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
 import { User, UserRole } from '@/types';
 import { ModuleType } from '@/types/modules';
+import { apiRequest, normalizeUser } from '@/lib/api';
 import { canAccessModule as userCanAccessModule, getDefaultPermissions, normalizeUserPermissions } from '@/lib/permissions';
 
 interface AuthContextType {
@@ -75,15 +76,56 @@ const MOCK_USERS: (User & { password: string })[] = [
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
     const stored = localStorage.getItem('auth_user');
-    return stored ? JSON.parse(stored) : null;
+    return stored ? normalizeUser(JSON.parse(stored)) : null;
   });
 
-  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
-    await new Promise(resolve => setTimeout(resolve, 500));
+  useEffect(() => {
+    let cancelled = false;
 
-    const foundUser = MOCK_USERS.find(
-      u => u.email === email && u.password === password
-    );
+    apiRequest<{ authenticated: boolean; user: User | null }>('/api/auth.php')
+      .then((data) => {
+        if (cancelled) return;
+        if (data.authenticated && data.user) {
+          const normalized = normalizeUser(data.user);
+          setUser(normalized);
+          localStorage.setItem('auth_user', JSON.stringify(normalized));
+        } else {
+          setUser(null);
+          localStorage.removeItem('auth_user');
+        }
+      })
+      .catch((error) => {
+        if (!(error instanceof TypeError)) {
+          setUser(null);
+          localStorage.removeItem('auth_user');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
+    try {
+      const data = await apiRequest<{ ok: boolean; user: User }>('/api/auth.php', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (data.ok && data.user) {
+        const normalized = normalizeUser(data.user);
+        setUser(normalized);
+        localStorage.setItem('auth_user', JSON.stringify(normalized));
+        return true;
+      }
+    } catch (error) {
+      if (!(error instanceof TypeError)) {
+        return false;
+      }
+    }
+
+    const foundUser = MOCK_USERS.find((u) => u.email === email && u.password === password);
 
     if (foundUser) {
       const { password: _, ...userWithoutPassword } = foundUser;
@@ -91,10 +133,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('auth_user', JSON.stringify(userWithoutPassword));
       return true;
     }
+
     return false;
   }, []);
 
   const logout = useCallback(() => {
+    apiRequest('/api/auth.php', { method: 'DELETE' }).catch(() => {});
     setUser(null);
     localStorage.removeItem('auth_user');
   }, []);

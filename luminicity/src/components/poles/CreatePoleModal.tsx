@@ -46,7 +46,7 @@ function MapClickHandler({ onLocationSelect }: { onLocationSelect: (lat: number,
 interface CreatePoleModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreated: (pole: { id: string; address: string; latitude: number; longitude: number; status: PoleStatus }) => void;
+  onCreated: (pole: { id: string; address: string; latitude: number; longitude: number; status: PoleStatus }) => void | boolean | Promise<void | boolean>;
   nextId: string;
   existingPoles?: Pole[];
   mapCenter: [number, number];
@@ -73,6 +73,7 @@ export function CreatePoleModal({
   const [longitude, setLongitude] = useState('');
   const [status, setStatus] = useState<PoleStatus>('FUNCIONANDO');
   const [markerPos, setMarkerPos] = useState<[number, number] | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const usage = getPoleUsage(currentPoleCount, poleLimit);
 
   const handleLocationSelect = async (lat: number, lng: number) => {
@@ -95,7 +96,7 @@ export function CreatePoleModal({
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (remainingPoleSlots <= 0) {
       toast.error('Limite de postes atingido.', {
         description: `Esta prefeitura permite ate ${formatPoleLimit(poleLimit)} pontos de poste.`,
@@ -115,7 +116,10 @@ export function CreatePoleModal({
       return;
     }
 
-    onCreated({ id: nextId, address, latitude: lat, longitude: lng, status });
+    setIsSaving(true);
+    const created = await onCreated({ id: nextId, address, latitude: lat, longitude: lng, status });
+    setIsSaving(false);
+    if (created === false) return;
     toast.success('Poste cadastrado!', { description: `${nextId} — ${address}` });
     resetForm();
     onOpenChange(false);
@@ -230,7 +234,9 @@ export function CreatePoleModal({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={remainingPoleSlots <= 0}>Cadastrar Poste</Button>
+          <Button onClick={handleSubmit} disabled={remainingPoleSlots <= 0 || isSaving}>
+            {isSaving ? 'Salvando...' : 'Cadastrar Poste'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

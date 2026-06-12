@@ -13,6 +13,7 @@ import { ComplaintsList } from '@/components/dashboard/ComplaintsList';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCityHall } from '@/contexts/CityHallContext';
 import { useModules } from '@/contexts/ModulesContext';
+import { usePoles } from '@/contexts/PolesContext';
 import { Navigate } from 'react-router-dom';
 import {
   Card,
@@ -34,11 +35,6 @@ import {
   Cell,
 } from 'recharts';
 
-const statusData = [
-  { name: 'Funcionando', value: 142, color: 'hsl(142, 72%, 35%)' },
-  { name: 'Queimados', value: 34, color: 'hsl(0, 72%, 51%)' },
-];
-
 const monthlyData = [
   { month: 'Jan', denuncias: 45, resolvidas: 42 },
   { month: 'Fev', denuncias: 52, resolvidas: 48 },
@@ -52,6 +48,7 @@ export default function Dashboard() {
   const { canApproveComplaints, canViewReports } = useAuth();
   const { activeCityHall } = useCityHall();
   const { currentModule } = useModules();
+  const { poles, updatePoleStatus } = usePoles();
   
   // If not on iluminação, redirect to module dashboard
   if (currentModule !== 'ILUMINACAO') {
@@ -60,6 +57,14 @@ export default function Dashboard() {
 
   const canViewComplaints = canApproveComplaints();
   const canViewFullStats = canViewReports();
+  const cityPoles = poles.filter((pole) => pole.cityHallId === activeCityHall.id);
+  const workingCount = cityPoles.filter((pole) => pole.status === 'FUNCIONANDO').length;
+  const brokenCount = cityPoles.filter((pole) => pole.status === 'QUEIMADO').length;
+  const workingPercent = cityPoles.length > 0 ? ((workingCount / cityPoles.length) * 100).toFixed(1) : '0.0';
+  const statusData = [
+    { name: 'Funcionando', value: workingCount, color: 'hsl(142, 72%, 35%)' },
+    { name: 'Queimados', value: brokenCount, color: 'hsl(0, 72%, 51%)' },
+  ];
 
   return (
     <DashboardLayout>
@@ -78,22 +83,22 @@ export default function Dashboard() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatsCard
             title="Total de Postes"
-            value="176"
+            value={cityPoles.length.toString()}
             description="Cadastrados no sistema"
             icon={<Lightbulb className="h-6 w-6" />}
             variant="default"
           />
           <StatsCard
             title="Postes Funcionando"
-            value="142"
-            description="80.7% do total"
+            value={workingCount.toString()}
+            description={`${workingPercent}% do total`}
             icon={<CheckCircle className="h-6 w-6" />}
             variant="success"
             trend={{ value: 5, isPositive: true }}
           />
           <StatsCard
             title="Postes Queimados"
-            value="34"
+            value={brokenCount.toString()}
             description="Aguardando manutenção"
             icon={<AlertTriangle className="h-6 w-6" />}
             variant="destructive"
@@ -184,7 +189,12 @@ export default function Dashboard() {
             <CardDescription>Visualização geográfica dos postes por status</CardDescription>
           </CardHeader>
           <CardContent>
-            <PoleMap center={[activeCityHall.latitude, activeCityHall.longitude]} />
+            <PoleMap
+              center={[activeCityHall.latitude, activeCityHall.longitude]}
+              poles={cityPoles}
+              editableStatus={true}
+              onStatusChange={updatePoleStatus}
+            />
           </CardContent>
         </Card>
 

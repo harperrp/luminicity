@@ -7,7 +7,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
-import { getPoleStats, getRecurrenceLevel, formatDateBR, daysSince } from '@/data/mockData';
 import { PoleHistoryDrawer } from '@/components/poles/PoleHistoryDrawer';
 import { cn } from '@/lib/utils';
 import 'leaflet/dist/leaflet.css';
@@ -38,17 +37,6 @@ const createCustomIcon = (status: PoleStatus) => {
 
 const VARGEM_GRANDE_CENTER: [number, number] = [-15.3983, -42.3097];
 
-const MOCK_POLES: Pole[] = [
-  { id: '1', latitude: -15.3989, longitude: -42.3091, status: 'FUNCIONANDO', neighborhood: 'Centro', address: 'Praça da Matriz, 100', cityHallId: '1', createdAt: new Date(), updatedAt: new Date() },
-  { id: '2', latitude: -15.3994, longitude: -42.3102, status: 'QUEIMADO', neighborhood: 'Centro', address: 'Rua Principal, 210', cityHallId: '1', createdAt: new Date(), updatedAt: new Date() },
-  { id: '3', latitude: -15.3976, longitude: -42.3088, status: 'FUNCIONANDO', neighborhood: 'Nova Esperança', address: 'Rua das Palmeiras, 55', cityHallId: '1', createdAt: new Date(), updatedAt: new Date() },
-  { id: '4', latitude: -15.4002, longitude: -42.3113, status: 'QUEIMADO', neighborhood: 'Vila São José', address: 'Avenida Minas Gerais, 480', cityHallId: '1', createdAt: new Date(), updatedAt: new Date() },
-  { id: '5', latitude: -15.3968, longitude: -42.3079, status: 'FUNCIONANDO', neighborhood: 'Jardim das Acácias', address: 'Rua das Flores, 12', cityHallId: '1', createdAt: new Date(), updatedAt: new Date() },
-  { id: '6', latitude: -15.4011, longitude: -42.3121, status: 'FUNCIONANDO', neighborhood: 'Vila Nova', address: 'Rua do Campo, 89', cityHallId: '1', createdAt: new Date(), updatedAt: new Date() },
-  { id: '7', latitude: -15.402, longitude: -42.3098, status: 'QUEIMADO', neighborhood: 'Bela Vista', address: 'Rua Bela Vista, 300', cityHallId: '1', createdAt: new Date(), updatedAt: new Date() },
-  { id: '8', latitude: -15.3972, longitude: -42.311, status: 'FUNCIONANDO', neighborhood: 'Alto da Serra', address: 'Travessa da Serra, 40', cityHallId: '1', createdAt: new Date(), updatedAt: new Date() },
-];
-
 interface PoleInsight {
   failuresTotal: number;
   failuresLast30Days: number;
@@ -66,7 +54,7 @@ interface PoleMapProps {
   selectedPoleId?: string;
   editableStatus?: boolean;
   poles?: Pole[];
-  onStatusChange?: (poleId: string, newStatus: PoleStatus) => void;
+  onStatusChange?: (poleId: string, newStatus: PoleStatus) => void | Pole | null | Promise<void | Pole | null>;
   defaultFilter?: PoleStatus | 'TODOS';
   poleInsights?: Record<string, PoleInsight>;
   route?: RoutePoint[];
@@ -131,7 +119,7 @@ export function PoleMap({
   center = VARGEM_GRANDE_CENTER,
   zoom = 15,
 }: PoleMapProps) {
-  const [internalPoles, setInternalPoles] = useState<Pole[]>(poles ?? MOCK_POLES);
+  const [internalPoles, setInternalPoles] = useState<Pole[]>(poles ?? []);
   const [filter, setFilter] = useState<PoleStatus | 'TODOS'>(defaultFilter);
   const [selectedPole, setSelectedPole] = useState<Pole | null>(null);
   const [historyPole, setHistoryPole] = useState<Pole | null>(null);
@@ -182,14 +170,25 @@ export function PoleMap({
     onPoleSelect?.(pole);
   };
 
-  const updatePoleStatus = (poleId: string, newStatus: PoleStatus) => {
+  const updatePoleStatus = async (poleId: string, newStatus: PoleStatus) => {
+    const result = await onStatusChange?.(poleId, newStatus);
+    if (result === null) return;
+
+    const currentPole = internalPoles.find((pole) => pole.id === poleId);
+    const updatedPole =
+      result && typeof result === 'object'
+        ? result
+        : currentPole
+          ? { ...currentPole, status: newStatus, updatedAt: new Date() }
+          : null;
+
+    if (!updatedPole) return;
+
     setInternalPoles((prev) =>
-      prev.map((pole) => (pole.id === poleId ? { ...pole, status: newStatus, updatedAt: new Date() } : pole)),
+      prev.map((pole) => (pole.id === poleId ? { ...pole, ...updatedPole, status: newStatus } : pole)),
     );
 
-    setSelectedPole((prev) => (prev && prev.id === poleId ? { ...prev, status: newStatus, updatedAt: new Date() } : prev));
-
-    onStatusChange?.(poleId, newStatus);
+    setSelectedPole((prev) => (prev && prev.id === poleId ? { ...prev, ...updatedPole, status: newStatus } : prev));
 
     toast.success('Status do poste atualizado', {
       description: `Poste #${poleId} agora está ${newStatus === 'FUNCIONANDO' ? 'consertado' : 'queimado'}.`,

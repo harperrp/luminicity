@@ -33,7 +33,7 @@ if ($method === 'GET') {
     $stmt = $pdo->prepare(
         "SELECT c.*, p.pole_code
          FROM complaints c
-         LEFT JOIN poles p ON p.id = c.pole_id
+         LEFT JOIN poles p ON p.id = c.pole_id " . pole_active_join_clause($pdo, 'p') . "
          $sqlWhere
          ORDER BY c.created_at DESC"
     );
@@ -59,7 +59,8 @@ if ($method === 'POST') {
 
     $poleId = null;
     if (!empty($data['poleId'])) {
-        $poleStmt = $pdo->prepare('SELECT id FROM poles WHERE city_hall_id = ? AND pole_code = ? LIMIT 1');
+        $poleWhere = array_merge(['city_hall_id = ?', 'pole_code = ?'], pole_active_conditions($pdo, 'poles'));
+        $poleStmt = $pdo->prepare('SELECT id FROM poles WHERE ' . implode(' AND ', $poleWhere) . ' LIMIT 1');
         $poleStmt->execute([$cityHallId, (string) $data['poleId']]);
         $pole = $poleStmt->fetch();
         $poleId = $pole ? (int) $pole['id'] : null;
@@ -87,7 +88,7 @@ if ($method === 'POST') {
 
     $id = (int) $pdo->lastInsertId();
     $stmt = $pdo->prepare(
-        'SELECT c.*, p.pole_code FROM complaints c LEFT JOIN poles p ON p.id = c.pole_id WHERE c.id = ? LIMIT 1'
+        'SELECT c.*, p.pole_code FROM complaints c LEFT JOIN poles p ON p.id = c.pole_id ' . pole_active_join_clause($pdo, 'p') . ' WHERE c.id = ? LIMIT 1'
     );
     $stmt->execute([$id]);
     json_response(['ok' => true, 'complaint' => map_complaint($stmt->fetch())], 201);
@@ -137,7 +138,7 @@ if ($method === 'PUT' || $method === 'PATCH') {
             'UPDATE poles p
              JOIN complaints c ON c.pole_id = p.id
              SET p.status = "QUEIMADO", p.updated_at = CURRENT_TIMESTAMP
-             WHERE c.id = ? AND c.pole_id IS NOT NULL'
+             WHERE c.id = ? AND c.pole_id IS NOT NULL' . pole_active_join_clause($pdo, 'p')
         )->execute([$id]);
     } else {
         $stmt = $pdo->prepare(
@@ -153,7 +154,7 @@ if ($method === 'PUT' || $method === 'PATCH') {
     }
 
     $stmt = $pdo->prepare(
-        'SELECT c.*, p.pole_code FROM complaints c LEFT JOIN poles p ON p.id = c.pole_id WHERE c.id = ? LIMIT 1'
+        'SELECT c.*, p.pole_code FROM complaints c LEFT JOIN poles p ON p.id = c.pole_id ' . pole_active_join_clause($pdo, 'p') . ' WHERE c.id = ? LIMIT 1'
     );
     $stmt->execute([$id]);
     json_response(['ok' => true, 'complaint' => map_complaint($stmt->fetch())]);
