@@ -26,9 +26,8 @@ if ($method === 'GET') {
     $stmt = $pdo->prepare(
         'SELECT m.*, p.pole_code
          FROM maintenance_orders m
-         LEFT JOIN poles p ON p.id = m.pole_id ' . pole_active_join_clause($pdo, 'p') . '
+         LEFT JOIN poles p ON p.id = m.pole_id
          WHERE ' . implode(' AND ', $where) . '
-           AND (m.pole_id IS NULL OR p.id IS NOT NULL)
          ORDER BY FIELD(m.priority, "alta", "media", "baixa"), m.created_at DESC'
     );
     $stmt->execute($params);
@@ -74,8 +73,7 @@ if ($method === 'PUT' || $method === 'PATCH') {
     )->execute([$data['resolution'] ?? null, $id]);
 
     if (!empty($order['pole_id'])) {
-        $where = array_merge(['id = ?'], pole_active_conditions($pdo, 'poles'));
-        $pdo->prepare('UPDATE poles SET status = "FUNCIONANDO", updated_at = CURRENT_TIMESTAMP WHERE ' . implode(' AND ', $where))
+        $pdo->prepare('UPDATE poles SET status = "FUNCIONANDO", updated_at = CURRENT_TIMESTAMP WHERE id = ?')
             ->execute([(int) $order['pole_id']]);
     }
 

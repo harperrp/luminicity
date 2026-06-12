@@ -5,31 +5,31 @@ require __DIR__ . '/common.php';
 require __DIR__ . '/db.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
+$user = require_login();
 
 if ($method === 'GET') {
-    $isPublicRequest = ($_GET['public'] ?? '') === '1';
-    $user = $isPublicRequest ? null : require_login();
     $params = [];
-    $where = ['enabled = 1'];
-
-    if ($isPublicRequest) {
-        $cityHallId = (int) ($_GET['cityHallId'] ?? 0);
-        if ($cityHallId > 0) {
-            $where[] = 'city_hall_id = ?';
-            $params[] = $cityHallId;
-        }
-    } elseif (($user['role'] ?? '') !== 'ADMIN') {
-        $where[] = 'city_hall_id = ?';
+    $where = '';
+    if (($user['role'] ?? '') !== 'ADMIN') {
+        $where = 'WHERE city_hall_id = ?';
         $params[] = (int) ($user['cityHallId'] ?? 0);
     }
 
-    $sqlWhere = 'WHERE ' . implode(' AND ', $where);
     $stmt = $pdo->prepare(
         "SELECT city_hall_id, module_id
          FROM city_hall_modules
-         $sqlWhere
+         $where
+         AND enabled = 1
          ORDER BY city_hall_id, module_id"
     );
+    if ($where === '') {
+        $stmt = $pdo->prepare(
+            'SELECT city_hall_id, module_id
+             FROM city_hall_modules
+             WHERE enabled = 1
+             ORDER BY city_hall_id, module_id'
+        );
+    }
     $stmt->execute($params);
 
     $activeModules = [];
@@ -43,7 +43,6 @@ if ($method === 'GET') {
 }
 
 if ($method === 'PUT' || $method === 'PATCH') {
-    $user = require_login();
     require_roles(['ADMIN']);
     $data = get_json_input();
     $cityHallId = (int) ($data['cityHallId'] ?? 0);

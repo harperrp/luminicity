@@ -5,22 +5,16 @@ require __DIR__ . '/common.php';
 require __DIR__ . '/db.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
+$user = require_login();
 
 if ($method === 'GET') {
-    $isPublicRequest = ($_GET['public'] ?? '') === '1';
-    $user = $isPublicRequest ? null : require_login();
     $params = [];
-    $where = [];
-
-    if ($isPublicRequest) {
-        $where[] = 'ch.status = "ATIVO"';
-    } elseif (($user['role'] ?? '') !== 'ADMIN') {
-        $where[] = 'ch.id = ?';
+    $where = '';
+    if (($user['role'] ?? '') !== 'ADMIN') {
+        $where = 'WHERE ch.id = ?';
         $params[] = (int) ($user['cityHallId'] ?? 0);
     }
 
-    $sqlWhere = $where ? 'WHERE ' . implode(' AND ', $where) : '';
-    $activePoleJoin = pole_active_join_clause($pdo, 'p');
     $stmt = $pdo->prepare(
         "SELECT
           ch.*,
@@ -28,8 +22,8 @@ if ($method === 'GET') {
           COUNT(DISTINCT p.id) AS poles_count
         FROM city_halls ch
         LEFT JOIN users u ON u.city_hall_id = ch.id AND u.active = 1
-        LEFT JOIN poles p ON p.city_hall_id = ch.id $activePoleJoin
-        $sqlWhere
+        LEFT JOIN poles p ON p.city_hall_id = ch.id
+        $where
         GROUP BY ch.id
         ORDER BY ch.name"
     );
@@ -39,7 +33,6 @@ if ($method === 'GET') {
 }
 
 if ($method === 'POST') {
-    $user = require_login();
     require_roles(['ADMIN']);
     $data = get_json_input();
     $modules = $data['modules'] ?? [];
@@ -85,7 +78,6 @@ if ($method === 'POST') {
 }
 
 if ($method === 'PUT' || $method === 'PATCH') {
-    $user = require_login();
     require_roles(['ADMIN']);
     $id = (int) ($_GET['id'] ?? 0);
     if ($id <= 0) {
@@ -123,7 +115,7 @@ if ($method === 'PUT' || $method === 'PATCH') {
         'SELECT ch.*, COUNT(DISTINCT u.id) AS users_count, COUNT(DISTINCT p.id) AS poles_count
          FROM city_halls ch
          LEFT JOIN users u ON u.city_hall_id = ch.id AND u.active = 1
-         LEFT JOIN poles p ON p.city_hall_id = ch.id ' . pole_active_join_clause($pdo, 'p') . '
+         LEFT JOIN poles p ON p.city_hall_id = ch.id
          WHERE ch.id = ?
          GROUP BY ch.id'
     );
