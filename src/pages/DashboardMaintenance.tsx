@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useCityHall } from '@/contexts/CityHallContext';
+import { buildNearestRoute, routeDistanceKm, type GeoPoint } from '@/lib/routing';
 
 interface PoleFailureStats {
   failuresTotal: number;
@@ -92,6 +93,9 @@ const priorityConfig = {
   baixa: { label: 'Baixa', className: 'bg-muted text-muted-foreground' },
 };
 
+const MAX_ROUTE_STOPS = 10;
+const MAX_TARGET_ROUTE_STOPS = 6;
+
 const distanceKm = (a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }) => {
   const toRad = (v: number) => (v * Math.PI) / 180;
   const R = 6371;
@@ -153,9 +157,15 @@ export default function DashboardMaintenance() {
   const [observations, setObservations] = useState('');
   const [currentPosition, setCurrentPosition] = useState({ latitude: -15.3983, longitude: -42.3097 });
   const [activeRoute, setActiveRoute] = useState<RoutePoint[] | undefined>(undefined);
+  const [activeRouteItemIds, setActiveRouteItemIds] = useState<string[]>([]);
+  const [routeOriginLabel, setRouteOriginLabel] = useState('Base da prefeitura');
+  const [isResolvingLocation, setIsResolvingLocation] = useState(false);
 
   useEffect(() => {
     setCurrentPosition({ latitude: activeCityHall.latitude, longitude: activeCityHall.longitude });
+    setRouteOriginLabel('Base da prefeitura');
+    setActiveRoute(undefined);
+    setActiveRouteItemIds([]);
 
     Promise.all([
       api.getPoles(activeCityHall.id),
@@ -189,17 +199,23 @@ export default function DashboardMaintenance() {
     [failureStats],
   );
 
-  const suggestedRoute = useMemo(() => buildRoute(items, currentPosition), [items, currentPosition]);
+  const suggestedRoute = useMemo(
+    () => buildNearestRoute(items, currentPosition, { maxStops: MAX_ROUTE_STOPS }),
+    [items, currentPosition],
+  );
+
+  const activeRouteItems = useMemo(
+    () => activeRouteItemIds
+      .map((id) => items.find((item) => item.id === id))
+      .filter((item): item is MaintenanceItem => Boolean(item)),
+    [activeRouteItemIds, items],
+  );
+
+  const displayedRoute = activeRouteItems.length > 0 ? activeRouteItems : suggestedRoute;
 
   const totalRouteDistance = useMemo(() => {
-    if (!suggestedRoute.length) return 0;
-
-    let total = distanceKm(currentPosition, suggestedRoute[0]);
-    for (let i = 0; i < suggestedRoute.length - 1; i++) {
-      total += distanceKm(suggestedRoute[i], suggestedRoute[i + 1]);
-    }
-    return total;
-  }, [suggestedRoute, currentPosition]);
+    return routeDistanceKm([currentPosition, ...displayedRoute]);
+  }, [displayedRoute, currentPosition]);
 
   const handleComplete = async () => {
     if (!selectedItem) return;
@@ -213,6 +229,8 @@ export default function DashboardMaintenance() {
 
       setItems((prev) => prev.filter((item) => item.id !== selectedItem.id));
       setPoles((prev) => prev.map((pole) => pole.id === selectedItem.poleId ? { ...pole, status: 'FUNCIONANDO', updatedAt: new Date() } : pole));
+      setActiveRoute(undefined);
+      setActiveRouteItemIds([]);
       setDialogOpen(false);
       setObservations('');
 
@@ -243,26 +261,124 @@ export default function DashboardMaintenance() {
     window.open(`https://www.google.com/maps?q=${item.latitude},${item.longitude}`, '_blank', 'noopener,noreferrer');
   };
 
-  const startSuggestedRoute = () => {
-    if (!suggestedRoute.length) {
+  const getTechnicianPosition = async (): Promise<{ point: GeoPoint; label: string }> => {
+    const fallback = {
+      point: { latitude: activeCityHall.latitude, longitude: activeCityHall.longitude },
+      label: 'Base da prefeitura',
+    };
+
+    if (!navigator.geolocation) {
+      toast.info('Localizacao indisponivel', {
+        description: 'Usando a base da prefeitura como origem da rota.',
+      });
+      return fallback;
+    }
+
+    return new Promise((resolve) => {
+      toast.info('Buscando localizacao do tecnico...');
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            point: {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+            },
+            label: 'Sua localizacao',
+          });
+        },
+        () => {
+          toast.warning('Nao foi possivel obter sua localizacao', {
+            description: 'Usando a base da prefeitura como origem da rota.',
+          });
+          resolve(fallback);
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 60000,
+          timeout: 10000,
+        },
+      );
+    });
+  };
+
+  const startSuggestedRoute = async (targetItem?: MaintenanceItem) => {
+    const routeSource = targetItem && !items.some((item) => item.id === targetItem.id)
+      ? [targetItem, ...items]
+      : items;
+
+    if (!routeSource.length) {
       toast.info('Sem postes queimados para rota.');
       return;
     }
 
-    const routePoints: RoutePoint[] = suggestedRoute.map((item) => ({
+    setIsResolvingLocation(true);
+    const origin = await getTechnicianPosition();
+    setIsResolvingLocation(false);
+    setCurrentPosition(origin.point);
+    setRouteOriginLabel(origin.label);
+
+    const routeItems = buildNearestRoute(routeSource, origin.point, {
+      targetId: targetItem?.id,
+      maxStops: targetItem ? MAX_TARGET_ROUTE_STOPS : MAX_ROUTE_STOPS,
+    });
+
+    const routePoints: RoutePoint[] = [
+      {
+        latitude: origin.point.latitude,
+        longitude: origin.point.longitude,
+        label: origin.label,
+        kind: 'origin',
+      },
+      ...routeItems.map((item, idx) => ({
       latitude: item.latitude,
       longitude: item.longitude,
       label: `${item.poleId} — ${item.address}`,
-    }));
+        kind: 'stop' as const,
+        stopNumber: idx + 1,
+      })),
+    ];
 
     setActiveRoute(routePoints);
+    setActiveRouteItemIds(routeItems.map((item) => item.id));
     toast.success('Rota otimizada ativada no mapa', {
       description: `${routePoints.length} paradas traçadas por proximidade.`,
     });
   };
 
+  const createRouteToPole = (pole: Pole) => {
+    const targetItem = items.find((item) => item.poleId === pole.id) ?? buildMaintenanceFromPoles([pole])[0];
+    if (!targetItem) {
+      toast.info('Este poste nao esta na fila de manutencao.');
+      return;
+    }
+
+    startSuggestedRoute(targetItem);
+  };
+
+  const openActiveRouteInMaps = () => {
+    if (!activeRoute || activeRoute.length < 2) return;
+
+    const origin = activeRoute.find((point) => point.kind === 'origin') ?? activeRoute[0];
+    const stops = activeRoute.filter((point) => point.kind !== 'origin');
+    const destination = stops[stops.length - 1];
+
+    if (!destination) return;
+
+    const params = new URLSearchParams({
+      api: '1',
+      origin: `${origin.latitude},${origin.longitude}`,
+      destination: `${destination.latitude},${destination.longitude}`,
+      travelmode: 'driving',
+    });
+    const waypoints = stops.slice(0, -1).map((point) => `${point.latitude},${point.longitude}`).join('|');
+    if (waypoints) params.set('waypoints', waypoints);
+
+    window.open(`https://www.google.com/maps/dir/?${params.toString()}`, '_blank', 'noopener,noreferrer');
+  };
+
   const cancelRoute = () => {
     setActiveRoute(undefined);
+    setActiveRouteItemIds([]);
     toast.info('Rota cancelada.');
   };
 
@@ -275,6 +391,8 @@ export default function DashboardMaintenance() {
 
     if (newStatus === 'FUNCIONANDO') {
       setItems((prev) => prev.filter((item) => item.poleId !== poleId));
+      setActiveRoute(undefined);
+      setActiveRouteItemIds([]);
     } else if (updatedPole && !pendingItem) {
       setItems((prev) => [...prev, ...buildMaintenanceFromPoles([updatedPole])]);
     }
@@ -301,14 +419,20 @@ export default function DashboardMaintenance() {
             <p className="text-muted-foreground">Vargem Grande do Rio Pardo: técnicos encontram o poste exato no mapa e atualizam de queimado para consertado no local.</p>
           </div>
           {activeRoute ? (
-            <Button onClick={cancelRoute} variant="destructive" className="w-full md:w-auto">
-              <X className="h-4 w-4 mr-2" />
-              Cancelar Rota
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+              <Button onClick={openActiveRouteInMaps} variant="outline" className="w-full md:w-auto">
+                <Navigation className="h-4 w-4 mr-2" />
+                Abrir no Maps
+              </Button>
+              <Button onClick={cancelRoute} variant="destructive" className="w-full md:w-auto">
+                <X className="h-4 w-4 mr-2" />
+                Cancelar Rota
+              </Button>
+            </div>
           ) : (
-            <Button onClick={startSuggestedRoute} className="w-full md:w-auto">
+            <Button onClick={() => startSuggestedRoute()} className="w-full md:w-auto" disabled={isResolvingLocation}>
               <Route className="h-4 w-4 mr-2" />
-              Iniciar Rota Otimizada
+              {isResolvingLocation ? 'Buscando localizacao...' : 'Iniciar Rota Otimizada'}
             </Button>
           )}
         </div>
@@ -380,6 +504,7 @@ export default function DashboardMaintenance() {
               poleInsights={failureStats}
               route={activeRoute}
               onCancelRoute={cancelRoute}
+              onCreateRouteToPole={createRouteToPole}
             />
           </CardContent>
         </Card>
@@ -395,8 +520,13 @@ export default function DashboardMaintenance() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {activeRoute && (
+              <p className="mb-3 text-sm text-muted-foreground">
+                Origem da rota: {routeOriginLabel}
+              </p>
+            )}
             <div className="grid gap-3 md:grid-cols-3">
-              {suggestedRoute.map((item, idx) => (
+              {displayedRoute.map((item, idx) => (
                 <div key={`route-${item.id}`} className="rounded-lg border p-3 bg-muted/30">
                   <p className="text-xs text-muted-foreground">Parada {idx + 1}</p>
                   <p className="font-semibold">{item.poleId}</p>
@@ -469,6 +599,10 @@ export default function DashboardMaintenance() {
                         <Button variant="outline" onClick={() => openMapAtPole(item)}>
                           <MapPin className="h-4 w-4 mr-1" />
                           Ver no mapa
+                        </Button>
+                        <Button variant="outline" onClick={() => startSuggestedRoute(item)} disabled={isResolvingLocation}>
+                          <Route className="h-4 w-4 mr-1" />
+                          Rota
                         </Button>
                         <Button
                           variant="success"

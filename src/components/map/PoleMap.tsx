@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { MapContainer, Marker, Popup, TileLayer, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { AlertTriangle, CheckCircle2, Eye, Lightbulb, Maximize2, Minimize2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Eye, Lightbulb, Maximize2, Minimize2, Route as RouteIcon } from 'lucide-react';
 import { Pole, PoleStatus } from '@/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -58,6 +58,8 @@ export interface RoutePoint {
   latitude: number;
   longitude: number;
   label: string;
+  kind?: 'origin' | 'stop';
+  stopNumber?: number;
 }
 
 interface PoleMapProps {
@@ -71,6 +73,7 @@ interface PoleMapProps {
   poleInsights?: Record<string, PoleInsight>;
   route?: RoutePoint[];
   onCancelRoute?: () => void;
+  onCreateRouteToPole?: (pole: Pole) => void;
   center?: [number, number];
   zoom?: number;
 }
@@ -128,6 +131,7 @@ export function PoleMap({
   poleInsights,
   route,
   onCancelRoute,
+  onCreateRouteToPole,
   center = VARGEM_GRANDE_CENTER,
   zoom = 15,
 }: PoleMapProps) {
@@ -285,6 +289,16 @@ export function PoleMap({
                         <Eye className="h-3.5 w-3.5" />
                         Histórico
                       </button>
+                      {onCreateRouteToPole && pole.status === 'QUEIMADO' && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onCreateRouteToPole(pole); }}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 hover:shadow-md transition-all duration-200"
+                          title="Gerar rota ate este poste"
+                        >
+                          <RouteIcon className="h-3.5 w-3.5" />
+                          Rota
+                        </button>
+                      )}
                       {editableStatus && (
                         <>
                           <button
@@ -330,18 +344,21 @@ export function PoleMap({
                 pathOptions={{ color: '#93c5fd', weight: 2, opacity: 0.7, dashArray: '8, 12' }}
               />
               {route.map((point, idx) => {
-                const isFirst = idx === 0;
-                const isLast = idx === route.length - 1;
-                const bg = isFirst ? '#22c55e' : isLast ? '#ef4444' : '#3b82f6';
-                const size = isFirst || isLast ? 34 : 28;
-                const fontSize = isFirst || isLast ? 15 : 13;
+                const isOrigin = point.kind === 'origin';
+                const stopNumber = point.stopNumber ?? route.slice(0, idx + 1).filter(item => item.kind !== 'origin').length;
+                const bg = isOrigin ? '#22c55e' : '#3b82f6';
+                const size = isOrigin ? 34 : 28;
+                const fontSize = isOrigin ? 12 : 13;
+                const isFirst = false;
+                const isLast = false;
+                const markerLabel = isOrigin ? 'VOC' : `${stopNumber}`;
                 const icon = isFirst ? '▶' : isLast ? '⬤' : `${idx + 1}`;
                 return (
                 <Marker
                   key={`route-${idx}`}
                   position={[point.latitude, point.longitude]}
                   icon={L.divIcon({
-                    html: `<div style="background:${bg};color:white;border-radius:50%;width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:${fontSize}px;border:3px solid white;box-shadow:0 3px 10px rgba(0,0,0,0.35);letter-spacing:-0.5px">${icon}</div>`,
+                    html: `<div style="background:${bg};color:white;border-radius:50%;width:${size}px;height:${size}px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:${fontSize}px;border:3px solid white;box-shadow:0 3px 10px rgba(0,0,0,0.35);letter-spacing:-0.5px">${markerLabel}</div>`,
                     className: 'route-number-marker',
                     iconSize: [size, size],
                     iconAnchor: [size / 2, size / 2],
@@ -349,7 +366,7 @@ export function PoleMap({
                 >
                   <Popup>
                     <div className="p-1 text-sm">
-                      <strong>Parada {idx + 1}</strong>
+                      <strong>{isOrigin ? 'Origem' : `Parada ${stopNumber}`}</strong>
                       <p>{point.label}</p>
                     </div>
                   </Popup>
@@ -450,6 +467,12 @@ export function PoleMap({
                   <TooltipContent>Visualizar histórico completo</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
+              {onCreateRouteToPole && selectedPole.status === 'QUEIMADO' && (
+                <Button size="sm" onClick={() => onCreateRouteToPole(selectedPole)}>
+                  <RouteIcon className="h-4 w-4 mr-1" />
+                  Rota ate aqui
+                </Button>
+              )}
               {renderStatusActions(selectedPole)}
               <Button variant="outline" size="sm" onClick={() => setSelectedPole(null)}>
                 Fechar

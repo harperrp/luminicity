@@ -55,6 +55,7 @@ export interface CityHall {
 
 export interface Pole {
   id: string;
+  databaseId?: string;
   latitude: number;
   longitude: number;
   status: PoleStatus;
