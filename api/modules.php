@@ -5,12 +5,12 @@ require __DIR__ . '/common.php';
 require __DIR__ . '/db.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
-$user = require_login();
 
 if ($method === 'GET') {
+    $user = current_user();
     $params = [];
     $where = '';
-    if (($user['role'] ?? '') !== 'ADMIN') {
+    if ($user !== null && ($user['role'] ?? '') !== 'ADMIN') {
         $where = 'WHERE city_hall_id = ?';
         $params[] = (int) ($user['cityHallId'] ?? 0);
     }

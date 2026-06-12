@@ -5,13 +5,13 @@ require __DIR__ . '/common.php';
 require __DIR__ . '/db.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
-$user = require_login();
 
 if ($method === 'GET') {
+    $user = current_user();
     $params = [];
     $where = [];
 
-    if (($user['role'] ?? '') !== 'ADMIN') {
+    if ($user !== null && ($user['role'] ?? '') !== 'ADMIN') {
         $where[] = 'city_hall_id = ?';
         $params[] = (int) ($user['cityHallId'] ?? 0);
     } elseif (!empty($_GET['cityHallId'])) {
@@ -26,6 +26,7 @@ if ($method === 'GET') {
 }
 
 if ($method === 'POST') {
+    $user = require_login();
     $data = get_json_input();
     $items = isset($data['poles']) && is_array($data['poles']) ? $data['poles'] : [$data];
     $created = [];
@@ -80,6 +81,7 @@ if ($method === 'POST') {
 }
 
 if ($method === 'PUT' || $method === 'PATCH') {
+    $user = require_login();
     $data = get_json_input();
     $poleCode = trim((string) ($_GET['id'] ?? $data['id'] ?? ''));
     $cityHallId = (string) ($data['cityHallId'] ?? $_GET['cityHallId'] ?? $user['cityHallId'] ?? '');
@@ -118,6 +120,7 @@ if ($method === 'PUT' || $method === 'PATCH') {
 }
 
 if ($method === 'DELETE') {
+    $user = require_login();
     $poleCode = trim((string) ($_GET['id'] ?? ''));
     $cityHallId = (string) ($_GET['cityHallId'] ?? $user['cityHallId'] ?? '');
     ensure_city_scope($user, $cityHallId);

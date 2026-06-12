@@ -67,11 +67,16 @@ function get_json_input(): array {
     return is_array($decoded) ? $decoded : [];
 }
 
+function current_user(): ?array {
+    return !empty($_SESSION['user']) && is_array($_SESSION['user']) ? $_SESSION['user'] : null;
+}
+
 function require_login(): array {
-    if (empty($_SESSION['user']) || !is_array($_SESSION['user'])) {
+    $user = current_user();
+    if ($user === null) {
         json_response(['ok' => false, 'error' => 'Nao autenticado'], 401);
     }
-    return $_SESSION['user'];
+    return $user;
 }
 
 function require_roles(array $roles): array {
